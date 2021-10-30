@@ -180,6 +180,19 @@ inline T dot(const T* x, const T* y, int f) {
   return s;
 }
 
+template<typename T>
+inline T euclidean_distance(const T* x, const T* y, int f) {
+  // Don't use dot-product: avoid catastrophic cancellation in #314.
+  T d = 0.0;
+  for (int i = 0; i < f; ++i) {
+    const T tmp=*x - *y;
+    d += tmp * tmp;
+    ++x;
+    ++y;
+  }
+  return d;
+}
+
 #ifdef ANNOYLIB_USE_AVX
 // Horizontal single sum of 256bit vector.
 inline float hsum256_ps_avx(__m256 v) {
@@ -205,6 +218,30 @@ inline float dot<float>(const float* x, const float *y, int f) {
   // Don't forget the remaining values.
   for (; f > 0; f--) {
     result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+template<>
+inline float euclidean_distance<float>(const float* x, const float* y, int f) {
+  float result=0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      const __m256 diff = _mm256_sub_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y));
+      d = _mm256_add_ps(d, _mm256_mul_ps(diff, diff)); // no support for fmadd in AVX...
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result = hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    float tmp = *x - *y;
+    result += tmp * tmp;
     x++;
     y++;
   }
@@ -237,6 +274,30 @@ inline float dot<float>(const float* x, const float *y, int f) {
   return result;
 }
 
+template<>
+inline float euclidean_distance<float>(const float* x, const float* y, int f) {
+  float result=0;
+  if (f > 15) {
+    __m512 d = _mm512_setzero_ps();
+    for (; f > 15; f -= 16) {
+      const __m512 diff = _mm512_sub_ps(_mm512_loadu_ps(x), _mm512_loadu_ps(y));
+      d = _mm512_fmadd_ps(diff, diff, d);
+      x += 16;
+      y += 16;
+    }
+    // Sum all floats in dot register.
+    result = _mm512_reduce_add_ps(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    float tmp = *x - *y;
+    result += tmp * tmp;
+    x++;
+    y++;
+  }
+  return result;
+}
+
 #endif
 
  
@@ -247,18 +308,20 @@ inline T get_norm(T* v, int f) {
 
 template<typename T, typename Random, typename Distance, typename Node>
 inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
-  /*
-    This algorithm is a huge heuristic. Empirically it works really well, but I
-    can't motivate it well. The basic idea is to keep two centroids and assign
-    points to either one of them. We weight each centroid by the number of points
-    assigned to it, so to balance it. 
-  */
-  static int iteration_steps = 200;
-  size_t count = nodes.size();
+  std::vector<Node*> centroids;
 
+  size_t count = nodes.size();
   size_t i = random.index(count);
   size_t j = random.index(count-1);
-  j += (j >= i); // ensure that i != j
+  j += j == i; // ensure that i != j
+
+  Node* p_node = (Node *) malloc(sizeof(Node));
+  memcpy(p_node, nodes[i], sizeof(Node));
+  centroids.push_back(p_node);
+
+  Node* q_node = (Node *) malloc(sizeof(Node));
+  memcpy(q_node, nodes[j], sizeof(Node));
+  centroids.push_back(q_node);
 
   Distance::template copy_node<T, Node>(p, nodes[i], f);
   Distance::template copy_node<T, Node>(q, nodes[j], f);
@@ -267,27 +330,58 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
   Distance::init_node(p, f);
   Distance::init_node(q, f);
 
-  int ic = 1, jc = 1;
-  for (int l = 0; l < iteration_steps; l++) {
-    size_t k = random.index(count);
-    T di = ic * Distance::distance(p, nodes[k], f),
-      dj = jc * Distance::distance(q, nodes[k], f);
-    T norm = cosine ? get_norm(nodes[k]->v, f) : 1;
-    if (!(norm > T(0))) {
-      continue;
+  for (int k = 0; k < nodes.size(); k++) {
+    nodes[k]->minDist = __DBL_MAX__;
+  }
+
+  for (int iter = 0; iter < 200; iter++) {
+    for (int a = 0; a < centroids.size(); a++) {
+      for (int b = 0; b < nodes.size(); b++) {
+        double dist = abs(Distance::distance(centroids[a], nodes[b], f));
+        if (dist < nodes[b]->minDist) {
+          nodes[b]->minDist = dist;
+          nodes[b]->cluster = a;
+        }
+      }
     }
-    if (di < dj) {
-      for (int z = 0; z < f; z++)
-        p->v[z] = (p->v[z] * ic + nodes[k]->v[z] / norm) / (ic + 1);
-      Distance::init_node(p, f);
-      ic++;
-    } else if (dj < di) {
-      for (int z = 0; z < f; z++)
-        q->v[z] = (q->v[z] * jc + nodes[k]->v[z] / norm) / (jc + 1);
-      Distance::init_node(q, f);
-      jc++;
+
+    vector<int> nPoints;
+    vector<vector<double>> sums;
+
+    // Initialise with zeroes
+    for (int k = 0; k < centroids.size(); ++k) {
+      nPoints.push_back(0);
+      sums.push_back(vector<double>());
+
+      for (int l = 0; l < f; ++l) {
+        sums[k].push_back(0);
+      }
+    }
+
+    // Iterate over points to append data to centroids
+    for (int k = 0; k < nodes.size(); k++) {
+      int c = nodes[k]->cluster;
+      nPoints[c]++;
+
+      for (int l = 0; l < f; l++) {
+        sums[c][l] += nodes[k]->v[l];
+      }
+
+      nodes[k]->minDist = __DBL_MAX__;  // reset distance
+    }
+
+    for (int k = 0; k < centroids.size(); k++) {
+      for (int l = 0; l < f; l++) {
+        centroids[k]->v[l] = sums[k][l] / nPoints[k];
+      }
     }
   }
+
+  p = centroids[0];
+  q = centroids[1];
+
+  Distance::init_node(p, f);
+  Distance::init_node(q, f);
 }
 } // namespace
 
@@ -341,6 +435,8 @@ struct Angular : Base {
       T norm;
     };
     T v[ANNOYLIB_V_ARRAY_SIZE];
+    double minDist;
+    int cluster;
   };
   template<typename S, typename T>
   static inline T distance(const Node<S, T>* x, const Node<S, T>* y, int f) {
@@ -399,6 +495,72 @@ struct Angular : Base {
   static const char* name() {
     return "angular";
   }
+};
+
+struct Minkowski : Base {
+  template<typename S, typename T>
+  struct Node {
+    S n_descendants;
+    T a; // need an extra constant term to determine the offset of the plane
+    S children[2];
+    T v[ANNOYLIB_V_ARRAY_SIZE];
+    double minDist;
+    int cluster;
+  };
+  template<typename S, typename T>
+  static inline T margin(const Node<S, T>* n, const T* y, int f) {
+    return n->a + dot(n->v, y, f);
+  }
+  template<typename S, typename T, typename Random>
+  static inline bool side(const Node<S, T>* n, const T* y, int f, Random& random) {
+    T dot = margin(n, y, f);
+    if (dot != 0)
+      return (dot > 0);
+    else
+      return (bool)random.flip();
+  }
+  template<typename T>
+  static inline T pq_distance(T distance, T margin, int child_nr) {
+    if (child_nr == 0)
+      margin = -margin;
+    return std::min(distance, margin);
+  }
+  template<typename T>
+  static inline T pq_initial_value() {
+    return numeric_limits<T>::infinity();
+  }
+};
+
+
+struct Euclidean : Minkowski {
+  template<typename S, typename T>
+  static inline T distance(const Node<S, T>* x, const Node<S, T>* y, int f) {
+    return euclidean_distance(x->v, y->v, f);    
+  }
+  template<typename S, typename T, typename Random>
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
+    Node<S, T>* p = (Node<S, T>*)alloca(s);
+    Node<S, T>* q = (Node<S, T>*)alloca(s);
+    two_means<T, Random, Euclidean, Node<S, T> >(nodes, f, random, false, p, q);
+
+    for (int z = 0; z < f; z++)
+      n->v[z] = p->v[z] - q->v[z];
+    Base::normalize<T, Node<S, T> >(n, f);
+    n->a = 0.0;
+    for (int z = 0; z < f; z++)
+      n->a += -n->v[z] * (p->v[z] + q->v[z]) / 2;
+  }
+  template<typename T>
+  static inline T normalized_distance(T distance) {
+    return sqrt(std::max(distance, T(0)));
+  }
+  template<typename S, typename T>
+  static inline void init_node(Node<S, T>* n, int f) {
+  }
+  static const char* name() {
+    return "euclidean";
+  }
+
 };
 
 template<typename S, typename T, typename R = uint64_t>
