@@ -2,10 +2,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from annoy import AnnoyIndex
 
-np.random.seed(0)
-X = np.random.randn(1000, 2)
+f = 10
 
-f = 2
+np.random.seed(0)
+X = np.random.randn(10000, f)
+
 t = AnnoyIndex(f, "euclidean")
 
 for i in range(X.shape[0]):
