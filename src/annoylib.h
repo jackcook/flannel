@@ -330,13 +330,13 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
   Distance::init_node(p, f);
   Distance::init_node(q, f);
 
-  for (int k = 0; k < nodes.size(); k++) {
+  for (unsigned long k = 0; k < nodes.size(); k++) {
     nodes[k]->minDist = __DBL_MAX__;
   }
 
   for (int iter = 0; iter < 200; iter++) {
-    for (int a = 0; a < centroids.size(); a++) {
-      for (int b = 0; b < nodes.size(); b++) {
+    for (unsigned long a = 0; a < centroids.size(); a++) {
+      for (unsigned long b = 0; b < nodes.size(); b++) {
         double dist = abs(Distance::distance(centroids[a], nodes[b], f));
         if (dist < nodes[b]->minDist) {
           nodes[b]->minDist = dist;
@@ -349,7 +349,7 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
     vector<vector<double>> sums;
 
     // Initialise with zeroes
-    for (int k = 0; k < centroids.size(); ++k) {
+    for (unsigned long k = 0; k < centroids.size(); ++k) {
       nPoints.push_back(0);
       sums.push_back(vector<double>());
 
@@ -359,7 +359,7 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
     }
 
     // Iterate over points to append data to centroids
-    for (int k = 0; k < nodes.size(); k++) {
+    for (unsigned long k = 0; k < nodes.size(); k++) {
       int c = nodes[k]->cluster;
       nPoints[c]++;
 
@@ -370,7 +370,7 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
       nodes[k]->minDist = __DBL_MAX__;  // reset distance
     }
 
-    for (int k = 0; k < centroids.size(); k++) {
+    for (unsigned long k = 0; k < centroids.size(); k++) {
       for (int l = 0; l < f; l++) {
         centroids[k]->v[l] = sums[k][l] / nPoints[k];
       }
