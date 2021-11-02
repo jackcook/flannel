@@ -315,20 +315,15 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
   size_t j = random.index(count-1);
   j += j == i; // ensure that i != j
 
-  Node* p_node = (Node *) malloc(sizeof(Node));
-  memcpy(p_node, nodes[i], sizeof(Node));
-  centroids.push_back(p_node);
-
-  Node* q_node = (Node *) malloc(sizeof(Node));
-  memcpy(q_node, nodes[j], sizeof(Node));
-  centroids.push_back(q_node);
-
   Distance::template copy_node<T, Node>(p, nodes[i], f);
   Distance::template copy_node<T, Node>(q, nodes[j], f);
 
   if (cosine) { Distance::template normalize<T, Node>(p, f); Distance::template normalize<T, Node>(q, f); }
   Distance::init_node(p, f);
   Distance::init_node(q, f);
+
+  centroids.push_back(p);
+  centroids.push_back(q);
 
   for (unsigned long k = 0; k < nodes.size(); k++) {
     nodes[k]->minDist = __DBL_MAX__;
@@ -376,9 +371,6 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
       }
     }
   }
-
-  p = centroids[0];
-  q = centroids[1];
 
   Distance::init_node(p, f);
   Distance::init_node(q, f);
