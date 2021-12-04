@@ -385,18 +385,17 @@ py_an_on_disk_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
 
 static PyObject *
 py_an_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
-  int q;
-  int n_jobs = -1;
+  int q, c, n_jobs = -1;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"n_trees", "n_jobs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|i", (char**)kwlist, &q, &n_jobs))
+  static char const * kwlist[] = {"n_trees", "n_clusters", "n_jobs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iii", (char**)kwlist, &q, &c, &n_jobs))
     return NULL;
 
   bool res;
   char* error;
   Py_BEGIN_ALLOW_THREADS;
-  res = self->ptr->build(q, n_jobs, &error);
+  res = self->ptr->build(q, c, n_jobs, &error);
   Py_END_ALLOW_THREADS;
   if (!res) {
     PyErr_SetString(PyExc_Exception, error);

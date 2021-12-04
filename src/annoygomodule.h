@@ -18,8 +18,8 @@ class AnnoyIndex {
   void addItem(int item, const float* w, int weight) {
     ptr->add_item(item, w, weight);
   };
-  void build(int q) {
-    ptr->build(q, 1);
+  void build(int q, int c) {
+    ptr->build(q, c, 1);
   };
   bool save(const char* filename, bool prefault) {
     return ptr->save(filename, prefault);

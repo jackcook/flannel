@@ -903,7 +903,7 @@ class AnnoyIndexInterface {
   // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
   virtual ~AnnoyIndexInterface() {};
   virtual bool add_item(S item, const T* w, int weight, char** error=NULL) = 0;
-  virtual bool build(int q, int n_threads=-1, char** error=NULL) = 0;
+  virtual bool build(int q, int c, int n_threads=-1, char** error=NULL) = 0;
   virtual bool unbuild(char** error=NULL) = 0;
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual void unload() = 0;
@@ -965,7 +965,6 @@ public:
     _verbose = false;
     _built = false;
     _K = (S) (((size_t) (_s - offsetof(Node, children))) / sizeof(S)); // Max number of descendants to fit into node
-    std::cout << "K = " << _K << std::endl;
     reinitialize(); // Reset everything
   }
   ~AnnoyIndex() {
@@ -1029,7 +1028,7 @@ public:
     return true;
   }
     
-  bool build(int q, int n_threads=-1, char** error=NULL) {
+  bool build(int q, int c, int n_threads=-1, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't build a loaded index");
       return false;
@@ -1044,7 +1043,7 @@ public:
 
     _n_nodes = _n_items;
 
-    ThreadedBuildPolicy::template build<S, T>(this, q, n_threads);
+    ThreadedBuildPolicy::template build<S, T>(this, q, c, n_threads);
 
     // Also, copy the roots into the last segment of the array
     // This way we can load them faster without reading the whole file
@@ -1233,6 +1232,135 @@ public:
     _seed = seed;
   }
 
+  void workload_aware_build(int n_clusters, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
+    // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
+    Random _random(_seed + thread_idx);
+
+    vector<int> centroid_indices;
+    vector<Node *> centroids;
+
+    // fill centroid_indices with n_clusters unique ints
+    for (int i = 0; i < n_clusters; i++) {
+      int centroid_index = _random.index(_n_items);
+
+      while (std::find(centroid_indices.begin(), centroid_indices.end(), centroid_index) != centroid_indices.end()) {
+        centroid_index = _random.index(_n_items);
+      }
+
+      centroid_indices.push_back(centroid_index);
+
+      Node* new_node = (Node *)alloca(_s);
+      Distance::template copy_node<T, Node>(new_node, _get(centroid_index), _f);
+
+      // if (cosine) { Distance::template normalize<T, Node>(p, _f); Distance::template normalize<T, Node>(q, _f); }
+      Distance::init_node(new_node, _f);
+
+      centroids.push_back(new_node);
+    }
+    
+    vector<int> clusters;
+    vector<T> minDists;
+
+    for (int k = 0; k < _n_nodes; k++) {
+      clusters.push_back(-1);
+      minDists.push_back(__DBL_MAX__);
+    }
+
+    for (int iter = 0; iter < 200; iter++) {
+      for (unsigned long a = 0; a < centroids.size(); a++) {
+        for (int b = 0; b < _n_nodes; b++) {
+          T dist = Distance::distance(centroids[a], _get(b), _f);
+
+          if (dist < minDists[b]) {
+            minDists[b] = dist;
+            clusters[b] = a;
+          }
+        }
+      }
+
+      vector<int> nPoints;
+      vector<vector<T>> sums;
+
+      // Initialise with zeroes
+      for (unsigned long k = 0; k < centroids.size(); ++k) {
+        nPoints.push_back(0);
+        sums.push_back(vector<T>());
+
+        for (int l = 0; l < _f; ++l) {
+          sums[k].push_back(0);
+        }
+      }
+
+      // Iterate over points to append data to centroids
+      for (int k = 0; k < _n_nodes; k++) {
+        int c = clusters[k];
+        nPoints[c]++;
+
+        for (int l = 0; l < _f; l++) {
+          sums[c][l] += _get(k)->v[l];
+        }
+      }
+
+      for (unsigned long k = 0; k < centroids.size(); k++) {
+        for (int l = 0; l < _f; l++) {
+          centroids[k]->v[l] = sums[k][l] / ((T) nPoints[k]);
+        }
+
+        Distance::init_node(centroids[k], _f);
+      }
+    }
+
+    if (_verbose) {
+      std::cout << "centroid_indices: ";
+
+      for (unsigned long i = 0; i < centroid_indices.size(); i++) {
+        std::cout << centroid_indices[i] << " ";
+      }
+
+      std::cout << std::endl;
+    }
+
+    std::vector<int> cluster_counts;
+
+    for (int i = 0; i < n_clusters; i++) {
+      int num = 0;
+
+      for (int j = 0; j < _n_nodes; j++) {
+        if (clusters[j] == i) {
+          num++;
+        }
+      }
+
+      cluster_counts.push_back(num);
+    }
+
+    if (_verbose) {
+      for (int i = 0; i < n_clusters; i++) {
+        std::cout << "cluster " << i << " has " << cluster_counts[i] << " points" << std::endl;
+      }
+    }
+
+    vector<S> thread_roots;
+    for (int cluster = 0; cluster < n_clusters; cluster++) {
+      if (_verbose) annoylib_showUpdate("pass %zd...\n", thread_roots.size());
+
+      vector<S> indices;
+      threaded_build_policy.lock_shared_nodes();
+      for (S i = 0; i < _n_items; i++) {
+        if (_get(i)->n_descendants >= 1 && clusters[i] == cluster) { // Issue #223
+          indices.push_back(i);
+        }
+      }
+      threaded_build_policy.unlock_shared_nodes();
+
+      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
+    }
+
+    threaded_build_policy.lock_roots();
+    _roots.insert(_roots.end(), thread_roots.begin(), thread_roots.end());
+    threaded_build_policy.unlock_roots();
+  }
+
   void thread_build(int q, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed + thread_idx);
@@ -1318,8 +1446,6 @@ protected:
   }
 
   S _make_tree(const vector<S>& indices, bool is_root, Random& _random, ThreadedBuildPolicy& threaded_build_policy) {
-    // std::cout << "make_tree " << indices.size() << std::endl;
-
     // The basic rule is that if we have <= _K items, then it's a leaf node, otherwise it's a split node.
     // There's some regrettable complications caused by the problem that root nodes have to be "special":
     // 1. We identify root nodes by the arguable logic that _n_items == n->n_descendants, regardless of how many descendants they actually have
@@ -1443,7 +1569,7 @@ protected:
       const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
       S i = top.second.second;
-      std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
+      // std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
       Node* nd = _get(i);
       q.pop();
       if (nd->n_descendants == 1 && i < _n_items) {
@@ -1486,8 +1612,9 @@ protected:
 class AnnoyIndexSingleThreadedBuildPolicy {
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int c, int n_threads) {
     AnnoyIndexSingleThreadedBuildPolicy threaded_build_policy;
+    annoy->workload_aware_build(c, 0, threaded_build_policy);
     annoy->thread_build(q, 0, threaded_build_policy);
   }
 
@@ -1513,13 +1640,15 @@ private:
 
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int c, int n_threads) {
     AnnoyIndexMultiThreadedBuildPolicy threaded_build_policy;
     if (n_threads == -1) {
       // If the hardware_concurrency() value is not well defined or not computable, it returns 0.
       // We guard against this by using at least 1 thread.
       n_threads = std::max(1, (int)std::thread::hardware_concurrency());
     }
+
+    annoy->workload_aware_build(c, 0, threaded_build_policy);
 
     vector<std::thread> threads(n_threads);
 
