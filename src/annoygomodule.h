@@ -15,8 +15,8 @@ class AnnoyIndex {
   ~AnnoyIndex() {
     delete ptr;
   };
-  void addItem(int item, const float* w) {
-    ptr->add_item(item, w);
+  void addItem(int item, const float* w, int weight) {
+    ptr->add_item(item, w, weight);
   };
   void build(int q) {
     ptr->build(q, 1);

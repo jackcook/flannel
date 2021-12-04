@@ -12,7 +12,6 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-
 #ifndef ANNOY_ANNOYLIB_H
 #define ANNOY_ANNOYLIB_H
 
@@ -26,6 +25,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <iostream>
 
 #if defined(_MSC_VER) && _MSC_VER == 1500
 typedef unsigned char     uint8_t;
@@ -364,14 +364,91 @@ inline T get_norm(T* v, int f) {
   return sqrt(dot(v, v, f));
 }
 
+// template<typename T, typename Random, typename Distance, typename Node>
+// inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
+//   vector<Node*> centroids;
+
+//   size_t count = nodes.size();
+//   size_t i = random.index(count);
+//   size_t j = random.index(count-1);
+//   j += (j == i); // ensure that i != j
+
+//   Distance::template copy_node<T, Node>(p, nodes[i], f);
+//   Distance::template copy_node<T, Node>(q, nodes[j], f);
+
+//   if (cosine) { Distance::template normalize<T, Node>(p, f); Distance::template normalize<T, Node>(q, f); }
+//   Distance::init_node(p, f);
+//   Distance::init_node(q, f);
+
+//   centroids.push_back(p);
+//   centroids.push_back(q);
+  
+//   vector<int> clusters;
+//   vector<T> minDists;
+
+//   for (unsigned long k = 0; k < nodes.size(); k++) {
+//     clusters.push_back(-1);
+//     minDists.push_back(__DBL_MAX__);
+//   }
+
+//   for (int iter = 0; iter < 200; iter++) {
+//     for (unsigned long a = 0; a < centroids.size(); a++) {
+//       for (unsigned long b = 0; b < nodes.size(); b++) {
+//         T dist = Distance::distance(centroids[a], nodes[b], f);
+
+//         if (dist < minDists[b]) {
+//           minDists[b] = dist;
+//           clusters[b] = a;
+//         }
+//       }
+//     }
+
+//     vector<int> nPoints;
+//     vector<vector<T>> sums;
+
+//     // Initialise with zeroes
+//     for (unsigned long k = 0; k < centroids.size(); ++k) {
+//       nPoints.push_back(0);
+//       sums.push_back(vector<T>());
+
+//       for (int l = 0; l < f; ++l) {
+//         sums[k].push_back(0);
+//       }
+//     }
+
+//     // Iterate over points to append data to centroids
+//     for (unsigned long k = 0; k < nodes.size(); k++) {
+//       int c = clusters[k];
+//       nPoints[c]++;
+
+//       for (int l = 0; l < f; l++) {
+//         sums[c][l] += nodes[k]->v[l];
+//       }
+//     }
+
+//     for (unsigned long k = 0; k < centroids.size(); k++) {
+//       for (int l = 0; l < f; l++) {
+//         centroids[k]->v[l] = sums[k][l] / ((T) nPoints[k]);
+//       }
+
+//       Distance::init_node(centroids[k], f);
+//     }
+//   }
+// }
 template<typename T, typename Random, typename Distance, typename Node>
 inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
-  vector<Node*> centroids;
-
+  /*
+    This algorithm is a huge heuristic. Empirically it works really well, but I
+    can't motivate it well. The basic idea is to keep two centroids and assign
+    points to either one of them. We weight each centroid by the number of points
+    assigned to it, so to balance it. 
+  */
+  static int iteration_steps = 200;
   size_t count = nodes.size();
+
   size_t i = random.index(count);
   size_t j = random.index(count-1);
-  j += (j == i); // ensure that i != j
+  j += (j >= i); // ensure that i != j
 
   Distance::template copy_node<T, Node>(p, nodes[i], f);
   Distance::template copy_node<T, Node>(q, nodes[j], f);
@@ -380,58 +457,25 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
   Distance::init_node(p, f);
   Distance::init_node(q, f);
 
-  centroids.push_back(p);
-  centroids.push_back(q);
-  
-  vector<int> clusters;
-  vector<T> minDists;
-
-  for (unsigned long k = 0; k < nodes.size(); k++) {
-    clusters.push_back(-1);
-    minDists.push_back(__DBL_MAX__);
-  }
-
-  for (int iter = 0; iter < 200; iter++) {
-    for (unsigned long a = 0; a < centroids.size(); a++) {
-      for (unsigned long b = 0; b < nodes.size(); b++) {
-        T dist = Distance::distance(centroids[a], nodes[b], f);
-
-        if (dist < minDists[b]) {
-          minDists[b] = dist;
-          clusters[b] = a;
-        }
-      }
+  int ic = 1, jc = 1;
+  for (int l = 0; l < iteration_steps; l++) {
+    size_t k = random.index(count);
+    T di = ic * Distance::distance(p, nodes[k], f),
+      dj = jc * Distance::distance(q, nodes[k], f);
+    T norm = cosine ? get_norm(nodes[k]->v, f) : 1;
+    if (!(norm > T(0))) {
+      continue;
     }
-
-    vector<int> nPoints;
-    vector<vector<T>> sums;
-
-    // Initialise with zeroes
-    for (unsigned long k = 0; k < centroids.size(); ++k) {
-      nPoints.push_back(0);
-      sums.push_back(vector<T>());
-
-      for (int l = 0; l < f; ++l) {
-        sums[k].push_back(0);
-      }
-    }
-
-    // Iterate over points to append data to centroids
-    for (unsigned long k = 0; k < nodes.size(); k++) {
-      int c = clusters[k];
-      nPoints[c]++;
-
-      for (int l = 0; l < f; l++) {
-        sums[c][l] += nodes[k]->v[l];
-      }
-    }
-
-    for (unsigned long k = 0; k < centroids.size(); k++) {
-      for (int l = 0; l < f; l++) {
-        centroids[k]->v[l] = sums[k][l] / ((T) nPoints[k]);
-      }
-
-      Distance::init_node(centroids[k], f);
+    if (di < dj) {
+      for (int z = 0; z < f; z++)
+        p->v[z] = (p->v[z] * ic + nodes[k]->v[z] / norm) / (ic + 1);
+      Distance::init_node(p, f);
+      ic++;
+    } else if (dj < di) {
+      for (int z = 0; z < f; z++)
+        q->v[z] = (q->v[z] * jc + nodes[k]->v[z] / norm) / (jc + 1);
+      Distance::init_node(q, f);
+      jc++;
     }
   }
 }
@@ -482,6 +526,7 @@ struct Angular : Base {
      * more memory to be able to fit the vector outside
      */
     S n_descendants;
+    S weight;
     union {
       S children[2]; // Will possibly store more than 2
       T norm;
@@ -555,6 +600,7 @@ struct DotProduct : Angular {
      * This is an extension of the Angular node with an extra attribute for the scaled norm.
      */
     S n_descendants;
+    S weight;
     S children[2]; // Will possibly store more than 2
     T dot_factor;
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -663,6 +709,7 @@ struct Hamming : Base {
   template<typename S, typename T>
   struct Node {
     S n_descendants;
+    S weight;
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
   };
@@ -759,6 +806,7 @@ struct Minkowski : Base {
   template<typename S, typename T>
   struct Node {
     S n_descendants;
+    S weight;
     T a; // need an extra constant term to determine the offset of the plane
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -854,7 +902,7 @@ class AnnoyIndexInterface {
  public:
   // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
   virtual ~AnnoyIndexInterface() {};
-  virtual bool add_item(S item, const T* w, char** error=NULL) = 0;
+  virtual bool add_item(S item, const T* w, int weight, char** error=NULL) = 0;
   virtual bool build(int q, int n_threads=-1, char** error=NULL) = 0;
   virtual bool unbuild(char** error=NULL) = 0;
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
@@ -917,6 +965,7 @@ public:
     _verbose = false;
     _built = false;
     _K = (S) (((size_t) (_s - offsetof(Node, children))) / sizeof(S)); // Max number of descendants to fit into node
+    std::cout << "K = " << _K << std::endl;
     reinitialize(); // Reset everything
   }
   ~AnnoyIndex() {
@@ -927,16 +976,17 @@ public:
     return _f;
   }
 
-  bool add_item(S item, const T* w, char** error=NULL) {
-    return add_item_impl(item, w, error);
+  bool add_item(S item, const T* w, int weight, char** error=NULL) {
+    return add_item_impl(item, w, weight, error);
   }
 
   template<typename W>
-  bool add_item_impl(S item, const W& w, char** error=NULL) {
+  bool add_item_impl(S item, const W& w, int weight, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't add an item to a loaded index");
       return false;
     }
+
     _allocate_size(item + 1);
     Node* n = _get(item);
 
@@ -945,6 +995,7 @@ public:
     n->children[0] = 0;
     n->children[1] = 0;
     n->n_descendants = 1;
+    n->weight = weight;
 
     for (int z = 0; z < _f; z++)
       n->v[z] = w[z];
@@ -1267,6 +1318,8 @@ protected:
   }
 
   S _make_tree(const vector<S>& indices, bool is_root, Random& _random, ThreadedBuildPolicy& threaded_build_policy) {
+    // std::cout << "make_tree " << indices.size() << std::endl;
+
     // The basic rule is that if we have <= _K items, then it's a leaf node, otherwise it's a split node.
     // There's some regrettable complications caused by the problem that root nodes have to be "special":
     // 1. We identify root nodes by the arguable logic that _n_items == n->n_descendants, regardless of how many descendants they actually have
@@ -1375,21 +1428,22 @@ protected:
     memcpy(v_node->v, v, sizeof(T) * _f);
     D::init_node(v_node, _f);
 
-    std::priority_queue<pair<T, S> > q;
+    std::priority_queue<pair<T, pair<S, S>> > q;
 
     if (search_k == -1) {
       search_k = n * _roots.size();
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
-      q.push(make_pair(Distance::template pq_initial_value<T>(), _roots[i]));
+      q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
     }
 
     std::vector<S> nns;
     while (nns.size() < (size_t)search_k && !q.empty()) {
-      const pair<T, S>& top = q.top();
+      const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
-      S i = top.second;
+      S i = top.second.second;
+      std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
       Node* nd = _get(i);
       q.pop();
       if (nd->n_descendants == 1 && i < _n_items) {
@@ -1399,8 +1453,8 @@ protected:
         nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
       } else {
         T margin = D::margin(nd, v, _f);
-        q.push(make_pair(D::pq_distance(d, margin, 1), static_cast<S>(nd->children[1])));
-        q.push(make_pair(D::pq_distance(d, margin, 0), static_cast<S>(nd->children[0])));
+        q.push(make_pair(D::pq_distance(d, margin, 1), make_pair(top.second.first, static_cast<S>(nd->children[1]))));
+        q.push(make_pair(D::pq_distance(d, margin, 0), make_pair(top.second.first, static_cast<S>(nd->children[0]))));
       }
     }
 

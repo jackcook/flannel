@@ -341,10 +341,11 @@ static PyObject*
 py_an_add_item(py_annoy *self, PyObject *args, PyObject* kwargs) {
   PyObject* v;
   int32_t item;
+  int32_t weight;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"i", "vector", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO", (char**)kwlist, &item, &v))
+  static char const * kwlist[] = {"i", "vector", "w", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO|i", (char**)kwlist, &item, &v, &weight))
     return NULL;
 
   if (!check_constraints(self, item, true)) {
@@ -356,7 +357,7 @@ py_an_add_item(py_annoy *self, PyObject *args, PyObject* kwargs) {
     return NULL;
   }
   char* error;
-  if (!self->ptr->add_item(item, &w[0], &error)) {
+  if (!self->ptr->add_item(item, &w[0], weight, &error)) {
     PyErr_SetString(PyExc_Exception, error);
     free(error);
     return NULL;
