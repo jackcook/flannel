@@ -1555,13 +1555,17 @@ protected:
     D::init_node(v_node, _f);
 
     std::priority_queue<pair<T, pair<S, S>> > q;
+    std::priority_queue<pair<T, pair<S, S>> > clusters_q;
 
     if (search_k == -1) {
       search_k = n * _roots.size();
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
-      q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
+      if (i < 10)
+        q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
+      else
+        clusters_q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
     }
 
     std::vector<S> nns;
@@ -1581,6 +1585,25 @@ protected:
         T margin = D::margin(nd, v, _f);
         q.push(make_pair(D::pq_distance(d, margin, 1), make_pair(top.second.first, static_cast<S>(nd->children[1]))));
         q.push(make_pair(D::pq_distance(d, margin, 0), make_pair(top.second.first, static_cast<S>(nd->children[0]))));
+      }
+    }
+
+    while (nns.size() < (size_t)search_k * 2 && !clusters_q.empty()) {
+      const pair<T, pair<S, S>>& top = clusters_q.top();
+      T d = top.first;
+      S i = top.second.second;
+      // std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
+      Node* nd = _get(i);
+      clusters_q.pop();
+      if (nd->n_descendants == 1 && i < _n_items) {
+        nns.push_back(i);
+      } else if (nd->n_descendants <= _K) {
+        const S* dst = nd->children;
+        nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
+      } else {
+        T margin = D::margin(nd, v, _f);
+        clusters_q.push(make_pair(D::pq_distance(d, margin, 1), make_pair(top.second.first, static_cast<S>(nd->children[1]))));
+        clusters_q.push(make_pair(D::pq_distance(d, margin, 0), make_pair(top.second.first, static_cast<S>(nd->children[0]))));
       }
     }
 

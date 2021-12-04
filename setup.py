@@ -72,14 +72,14 @@ manual_linker_args = os.environ.get('ANNOY_LINKER_ARGS', None)
 if manual_linker_args:
     extra_link_args = manual_linker_args.split(',')
 
-setup(name='annoy',
+setup(name='flannel',
       version='1.17.0',
       description='Approximate Nearest Neighbors in C++/Python optimized for memory usage and loading/saving to disk.',
-      packages=['annoy'],
-      package_data={'annoy': ['__init__.pyi', 'py.typed']},
+      packages=['flannel'],
+      package_data={'flannel': ['__init__.pyi', 'py.typed']},
       ext_modules=[
           Extension(
-              'annoy.annoylib', ['src/annoymodule.cc'],
+              'flannel.annoylib', ['src/annoymodule.cc'],
               depends=['src/annoylib.h', 'src/kissrandom.h', 'src/mman.h'],
               extra_compile_args=extra_compile_args,
               extra_link_args=extra_link_args,
