@@ -1273,14 +1273,14 @@ public:
     vector<int> clusters;
     vector<T> minDists;
 
-    for (int k = 0; k < _n_nodes; k++) {
+    for (int k = 0; k < _n_items; k++) {
       clusters.push_back(-1);
       minDists.push_back(__DBL_MAX__);
     }
 
     for (int iter = 0; iter < 200; iter++) {
       for (unsigned long a = 0; a < centroids.size(); a++) {
-        for (int b = 0; b < _n_nodes; b++) {
+        for (int b = 0; b < _n_items; b++) {
           T dist = Distance::distance(centroids[a], _get(b), _f);
 
           if (dist < minDists[b]) {
@@ -1304,7 +1304,7 @@ public:
       }
 
       // Iterate over points to append data to centroids
-      for (int k = 0; k < _n_nodes; k++) {
+      for (int k = 0; k < _n_items; k++) {
         int c = clusters[k];
         nPoints[c]++;
 
@@ -1337,7 +1337,7 @@ public:
     for (int i = 0; i < n_clusters; i++) {
       int num = 0;
 
-      for (int j = 0; j < _n_nodes; j++) {
+      for (int j = 0; j < _n_items; j++) {
         if (clusters[j] == i) {
           num++;
         }
@@ -1474,7 +1474,7 @@ protected:
 
       threaded_build_policy.lock_shared_nodes();
       Node* m = _get(item);
-      m->n_descendants = (S)indices.size();
+      m->n_descendants = is_root ? _n_items : (S)indices.size();
       m->is_root = is_root;
       m->is_cluster_root = (S)indices.size() == _n_items;
 
@@ -1544,7 +1544,7 @@ protected:
 
     int flip = (children_indices[0].size() > children_indices[1].size());
 
-    m->n_descendants = (S)indices.size();
+    m->n_descendants = is_root ? _n_items : (S)indices.size();
     m->is_root = is_root;
     m->is_cluster_root = (S)indices.size() != _n_items;
     for (int side = 0; side < 2; side++) {
