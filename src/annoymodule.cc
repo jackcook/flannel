@@ -341,11 +341,11 @@ static PyObject*
 py_an_add_item(py_annoy *self, PyObject *args, PyObject* kwargs) {
   PyObject* v;
   int32_t item;
-  int32_t weight;
+  float weight = 1;
   if (!self->ptr) 
     return NULL;
   static char const * kwlist[] = {"i", "vector", "w", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO|i", (char**)kwlist, &item, &v, &weight))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO|f", (char**)kwlist, &item, &v, &weight))
     return NULL;
 
   if (!check_constraints(self, item, true)) {
@@ -385,11 +385,11 @@ py_an_on_disk_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
 
 static PyObject *
 py_an_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
-  int q, c, n_jobs = -1;
+  int q, c = 0, n_jobs = -1;
   if (!self->ptr) 
     return NULL;
   static char const * kwlist[] = {"n_trees", "n_clusters", "n_jobs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iii", (char**)kwlist, &q, &c, &n_jobs))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ii", (char**)kwlist, &q, &c, &n_jobs))
     return NULL;
 
   bool res;

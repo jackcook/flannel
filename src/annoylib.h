@@ -525,6 +525,8 @@ struct Angular : Base {
      * Note that we can't really do sizeof(node<T>) because we cheat and allocate
      * more memory to be able to fit the vector outside
      */
+    bool is_root;
+    bool is_cluster_root;
     S n_descendants;
     S weight;
     union {
@@ -599,6 +601,8 @@ struct DotProduct : Angular {
     /*
      * This is an extension of the Angular node with an extra attribute for the scaled norm.
      */
+    bool is_root;
+    bool is_cluster_root;
     S n_descendants;
     S weight;
     S children[2]; // Will possibly store more than 2
@@ -708,6 +712,8 @@ struct DotProduct : Angular {
 struct Hamming : Base {
   template<typename S, typename T>
   struct Node {
+    bool is_root;
+    bool is_cluster_root;
     S n_descendants;
     S weight;
     S children[2];
@@ -805,6 +811,8 @@ struct Hamming : Base {
 struct Minkowski : Base {
   template<typename S, typename T>
   struct Node {
+    bool is_root;
+    bool is_cluster_root;
     S n_descendants;
     S weight;
     T a; // need an extra constant term to determine the offset of the plane
@@ -902,7 +910,7 @@ class AnnoyIndexInterface {
  public:
   // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
   virtual ~AnnoyIndexInterface() {};
-  virtual bool add_item(S item, const T* w, int weight, char** error=NULL) = 0;
+  virtual bool add_item(S item, const T* w, T weight, char** error=NULL) = 0;
   virtual bool build(int q, int c, int n_threads=-1, char** error=NULL) = 0;
   virtual bool unbuild(char** error=NULL) = 0;
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
@@ -975,12 +983,12 @@ public:
     return _f;
   }
 
-  bool add_item(S item, const T* w, int weight, char** error=NULL) {
+  bool add_item(S item, const T* w, T weight, char** error=NULL) {
     return add_item_impl(item, w, weight, error);
   }
 
   template<typename W>
-  bool add_item_impl(S item, const W& w, int weight, char** error=NULL) {
+  bool add_item_impl(S item, const W& w, T weight, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't add an item to a loaded index");
       return false;
@@ -1178,10 +1186,11 @@ public:
     _roots.clear();
     S m = -1;
     for (S i = _n_nodes - 1; i >= 0; i--) {
-      S k = _get(i)->n_descendants;
-      if (m == -1 || k == m) {
+      if (_get(i)->is_root) {
         _roots.push_back(i);
-        m = k;
+
+        if (!_get(i)->is_cluster_root)
+          m = _get(i)->n_descendants;
       } else {
         break;
       }
@@ -1233,6 +1242,9 @@ public:
   }
 
   void workload_aware_build(int n_clusters, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
+    if (n_clusters == 0)
+      return;
+
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed + thread_idx);
 
@@ -1462,7 +1474,9 @@ protected:
 
       threaded_build_policy.lock_shared_nodes();
       Node* m = _get(item);
-      m->n_descendants = is_root ? _n_items : (S)indices.size();
+      m->n_descendants = (S)indices.size();
+      m->is_root = is_root;
+      m->is_cluster_root = (S)indices.size() == _n_items;
 
       // Using std::copy instead of a loop seems to resolve issues #3 and #13,
       // probably because gcc 4.8 goes overboard with optimizations.
@@ -1530,7 +1544,9 @@ protected:
 
     int flip = (children_indices[0].size() > children_indices[1].size());
 
-    m->n_descendants = is_root ? _n_items : (S)indices.size();
+    m->n_descendants = (S)indices.size();
+    m->is_root = is_root;
+    m->is_cluster_root = (S)indices.size() != _n_items;
     for (int side = 0; side < 2; side++) {
       // run _make_tree for the smallest child first (for cache locality)
       m->children[side^flip] = _make_tree(children_indices[side^flip], false, _random, threaded_build_policy);
@@ -1562,10 +1578,12 @@ protected:
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
-      if (i < 10)
-        q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
+      auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
+
+      if (_get(_roots[i])->is_cluster_root)
+        clusters_q.push(p);
       else
-        clusters_q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i])));
+        q.push(p);
     }
 
     std::vector<S> nns;

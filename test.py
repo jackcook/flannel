@@ -21,7 +21,11 @@ for a in trange(10):
 
     # print("building")
     t_old.build(10, n_jobs=1)
-    t.build(10, 10, n_jobs=1)
+    t.build(10, 5, n_jobs=1)
+    t.save("test.ann")
+
+    t = FlannelIndex(f, "angular")
+    t.load("test.ann")
 
     k = 10
     gt_idx, gt_dist = t_old.get_nns_by_item(0, k, search_k=1000000, include_distances=True)
