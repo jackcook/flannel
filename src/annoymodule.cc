@@ -223,11 +223,12 @@ bool check_constraints(py_annoy *self, int32_t item, bool building) {
 static PyObject* 
 py_an_get_nns_by_item(py_annoy *self, PyObject *args, PyObject *kwargs) {
   int32_t item, n, search_k=-1, include_distances=0;
+  float clusters_p=0.5;
   if (!self->ptr) 
     return NULL;
 
-  static char const * kwlist[] = {"i", "n", "search_k", "include_distances", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii|ii", (char**)kwlist, &item, &n, &search_k, &include_distances))
+  static char const * kwlist[] = {"i", "n", "search_k", "clusters_p", "include_distances", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii|ifi", (char**)kwlist, &item, &n, &search_k, &clusters_p, &include_distances))
     return NULL;
 
   if (!check_constraints(self, item, false)) {
@@ -238,7 +239,7 @@ py_an_get_nns_by_item(py_annoy *self, PyObject *args, PyObject *kwargs) {
   vector<float> distances;
 
   Py_BEGIN_ALLOW_THREADS;
-  self->ptr->get_nns_by_item(item, n, search_k, &result, include_distances ? &distances : NULL);
+  self->ptr->get_nns_by_item(item, n, search_k, clusters_p, &result, include_distances ? &distances : NULL);
   Py_END_ALLOW_THREADS;
 
   return get_nns_to_python(result, distances, include_distances);
@@ -280,11 +281,12 @@ static PyObject*
 py_an_get_nns_by_vector(py_annoy *self, PyObject *args, PyObject *kwargs) {
   PyObject* v;
   int32_t n, search_k=-1, include_distances=0;
+  float clusters_p=0.5;
   if (!self->ptr) 
     return NULL;
 
-  static char const * kwlist[] = {"vector", "n", "search_k", "include_distances", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oi|ii", (char**)kwlist, &v, &n, &search_k, &include_distances))
+  static char const * kwlist[] = {"vector", "n", "search_k", "clusters_p", "include_distances", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oi|ifi", (char**)kwlist, &v, &n, &search_k, &clusters_p, &include_distances))
     return NULL;
 
   vector<float> w(self->f);
@@ -296,7 +298,7 @@ py_an_get_nns_by_vector(py_annoy *self, PyObject *args, PyObject *kwargs) {
   vector<float> distances;
 
   Py_BEGIN_ALLOW_THREADS;
-  self->ptr->get_nns_by_vector(&w[0], n, search_k, &result, include_distances ? &distances : NULL);
+  self->ptr->get_nns_by_vector(&w[0], n, search_k, clusters_p, &result, include_distances ? &distances : NULL);
   Py_END_ALLOW_THREADS;
 
   return get_nns_to_python(result, distances, include_distances);
@@ -386,16 +388,17 @@ py_an_on_disk_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
 static PyObject *
 py_an_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
   int q, c = 0, n_jobs = -1;
+  float top_p = 1;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"n_trees", "n_clusters", "n_jobs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ii", (char**)kwlist, &q, &c, &n_jobs))
+  static char const * kwlist[] = {"n_trees", "n_clusters", "top_p", "n_jobs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ifi", (char**)kwlist, &q, &c, &top_p, &n_jobs))
     return NULL;
 
   bool res;
   char* error;
   Py_BEGIN_ALLOW_THREADS;
-  res = self->ptr->build(q, c, n_jobs, &error);
+  res = self->ptr->build(q, c, top_p, n_jobs, &error);
   Py_END_ALLOW_THREADS;
   if (!res) {
     PyErr_SetString(PyExc_Exception, error);

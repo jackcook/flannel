@@ -911,14 +911,14 @@ class AnnoyIndexInterface {
   // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
   virtual ~AnnoyIndexInterface() {};
   virtual bool add_item(S item, const T* w, T weight, char** error=NULL) = 0;
-  virtual bool build(int q, int c, int n_threads=-1, char** error=NULL) = 0;
+  virtual bool build(int q, int c=0, float top_p=1, int n_threads=-1, char** error=NULL) = 0;
   virtual bool unbuild(char** error=NULL) = 0;
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual void unload() = 0;
   virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual T get_distance(S i, S j) const = 0;
-  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
-  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_n_trees() const = 0;
   virtual void verbose(bool v) = 0;
@@ -1036,7 +1036,7 @@ public:
     return true;
   }
     
-  bool build(int q, int c, int n_threads=-1, char** error=NULL) {
+  bool build(int q, int c=0, float top_p=1, int n_threads=-1, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't build a loaded index");
       return false;
@@ -1051,7 +1051,7 @@ public:
 
     _n_nodes = _n_items;
 
-    ThreadedBuildPolicy::template build<S, T>(this, q, c, n_threads);
+    ThreadedBuildPolicy::template build<S, T>(this, q, c, top_p, n_threads);
 
     // Also, copy the roots into the last segment of the array
     // This way we can load them faster without reading the whole file
@@ -1209,14 +1209,14 @@ public:
     return D::normalized_distance(D::distance(_get(i), _get(j), _f));
   }
 
-  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
     // TODO: handle OOB
     const Node* m = _get(item);
-    _get_all_nns(m->v, n, search_k, result, distances);
+    _get_all_nns(m->v, n, search_k, clusters_p, result, distances);
   }
 
-  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
-    _get_all_nns(w, n, search_k, result, distances);
+  void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
+    _get_all_nns(w, n, search_k, clusters_p, result, distances);
   }
 
   S get_n_items() const {
@@ -1241,9 +1241,21 @@ public:
     _seed = seed;
   }
 
-  void workload_aware_build(int n_clusters, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
+  void workload_aware_build(int n_clusters, float top_p, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
     if (n_clusters == 0)
       return;
+    
+    // Get top percentile of items by weight
+    vector<pair<S, T>> items;
+
+    for (int i = 0; i < _n_items; i++) {
+      items.push_back(make_pair(_get(i)->weight, i));
+    }
+
+    auto cmp = [](pair<S, T> a, pair<S, T> b) { return a.first > b.first; };
+    std::sort(items.begin(), items.end(), cmp);
+
+    items.erase(items.begin() + (int) ((float) _n_items * top_p), items.end());
 
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed + thread_idx);
@@ -1273,15 +1285,15 @@ public:
     vector<int> clusters;
     vector<T> minDists;
 
-    for (int k = 0; k < _n_items; k++) {
+    for (size_t k = 0; k < items.size(); k++) {
       clusters.push_back(-1);
       minDists.push_back(__DBL_MAX__);
     }
 
     for (int iter = 0; iter < 200; iter++) {
       for (unsigned long a = 0; a < centroids.size(); a++) {
-        for (int b = 0; b < _n_items; b++) {
-          T dist = Distance::distance(centroids[a], _get(b), _f);
+        for (size_t b = 0; b < items.size(); b++) {
+          T dist = Distance::distance(centroids[a], _get(items[b].second), _f);
 
           if (dist < minDists[b]) {
             minDists[b] = dist;
@@ -1304,12 +1316,12 @@ public:
       }
 
       // Iterate over points to append data to centroids
-      for (int k = 0; k < _n_items; k++) {
+      for (size_t k = 0; k < items.size(); k++) {
         int c = clusters[k];
         nPoints[c]++;
 
         for (int l = 0; l < _f; l++) {
-          sums[c][l] += _get(k)->v[l];
+          sums[c][l] += _get(items[k].second)->v[l];
         }
       }
 
@@ -1337,7 +1349,7 @@ public:
     for (int i = 0; i < n_clusters; i++) {
       int num = 0;
 
-      for (int j = 0; j < _n_items; j++) {
+      for (size_t j = 0; j < items.size(); j++) {
         if (clusters[j] == i) {
           num++;
         }
@@ -1358,9 +1370,9 @@ public:
 
       vector<S> indices;
       threaded_build_policy.lock_shared_nodes();
-      for (S i = 0; i < _n_items; i++) {
-        if (_get(i)->n_descendants >= 1 && clusters[i] == cluster) { // Issue #223
-          indices.push_back(i);
+      for (size_t i = 0; i < items.size(); i++) {
+        if (_get(items[i].second)->n_descendants >= 1 && clusters[i] == cluster) { // Issue #223
+          indices.push_back(items[i].second);
         }
       }
       threaded_build_policy.unlock_shared_nodes();
@@ -1564,7 +1576,7 @@ protected:
     return item;
   }
 
-  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void _get_all_nns(const T* v, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);
@@ -1587,7 +1599,7 @@ protected:
     }
 
     std::vector<S> nns;
-    while (nns.size() < (size_t)search_k && !q.empty()) {
+    while (nns.size() < (size_t)((float) search_k * (1 - clusters_p)) && !q.empty()) {
       const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
       S i = top.second.second;
@@ -1606,7 +1618,7 @@ protected:
       }
     }
 
-    while (nns.size() < (size_t)search_k * 2 && !clusters_q.empty()) {
+    while (nns.size() < (size_t)((float) search_k * clusters_p) && !clusters_q.empty()) {
       const pair<T, pair<S, S>>& top = clusters_q.top();
       T d = top.first;
       S i = top.second.second;
@@ -1653,9 +1665,9 @@ protected:
 class AnnoyIndexSingleThreadedBuildPolicy {
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int c, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int c, float top_p, int n_threads) {
     AnnoyIndexSingleThreadedBuildPolicy threaded_build_policy;
-    annoy->workload_aware_build(c, 0, threaded_build_policy);
+    annoy->workload_aware_build(c, top_p, 0, threaded_build_policy);
     annoy->thread_build(q, 0, threaded_build_policy);
   }
 
@@ -1681,7 +1693,7 @@ private:
 
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int c, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int c, float top_p, int n_threads) {
     AnnoyIndexMultiThreadedBuildPolicy threaded_build_policy;
     if (n_threads == -1) {
       // If the hardware_concurrency() value is not well defined or not computable, it returns 0.
@@ -1689,7 +1701,7 @@ public:
       n_threads = std::max(1, (int)std::thread::hardware_concurrency());
     }
 
-    annoy->workload_aware_build(c, 0, threaded_build_policy);
+    annoy->workload_aware_build(c, top_p, 0, threaded_build_policy);
 
     vector<std::thread> threads(n_threads);
 
