@@ -277,6 +277,33 @@ convert_list_to_vector(PyObject* v, int f, vector<float>* w) {
   return true;
 }
 
+bool
+convert_list_to_int_vector(PyObject* v, vector<int>* w) {
+  Py_ssize_t length = PyObject_Size(v);
+  if (length == -1) {
+    return false;
+  }
+
+  for (int z = 0; z < length; z++) {
+    PyObject *key = PyInt_FromLong(z);
+    if (key == NULL) {
+      return false;
+    }
+    PyObject *pf = PyObject_GetItem(v, key);
+    Py_DECREF(key);
+    if (pf == NULL) {
+      return false;
+    }
+    double value = PyFloat_AsDouble(pf);
+    Py_DECREF(pf);
+    if (value == -1.0 && PyErr_Occurred()) {
+      return false;
+    }
+    (*w)[z] = (int) value;
+  }
+  return true;
+}
+
 static PyObject* 
 py_an_get_nns_by_vector(py_annoy *self, PyObject *args, PyObject *kwargs) {
   PyObject* v;
@@ -344,10 +371,11 @@ py_an_add_item(py_annoy *self, PyObject *args, PyObject* kwargs) {
   PyObject* v;
   int32_t item;
   float weight = 1;
+  PyObject* neighbors;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"i", "vector", "w", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO|f", (char**)kwlist, &item, &v, &weight))
+  static char const * kwlist[] = {"i", "vector", "w", "neighbors", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iO|fO", (char**)kwlist, &item, &v, &weight, &neighbors))
     return NULL;
 
   if (!check_constraints(self, item, true)) {
@@ -358,8 +386,14 @@ py_an_add_item(py_annoy *self, PyObject *args, PyObject* kwargs) {
   if (!convert_list_to_vector(v, self->f, &w)) {
     return NULL;
   }
+
+  vector<int32_t> x(PyObject_Size(neighbors));
+  if (!convert_list_to_int_vector(neighbors, &x)) {
+    return NULL;
+  }
+
   char* error;
-  if (!self->ptr->add_item(item, &w[0], weight, &error)) {
+  if (!self->ptr->add_item(item, &w[0], weight, PyObject_Size(neighbors), &x[0], &error)) {
     PyErr_SetString(PyExc_Exception, error);
     free(error);
     return NULL;
@@ -388,17 +422,18 @@ py_an_on_disk_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
 static PyObject *
 py_an_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
   int q, c = 0, n_jobs = -1;
+  bool with_neighbors = false;
   float top_p = 1;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"n_trees", "n_clusters", "top_p", "n_jobs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ifi", (char**)kwlist, &q, &c, &top_p, &n_jobs))
+  static char const * kwlist[] = {"n_trees", "n_clusters", "top_p", "with_neighbors", "n_jobs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ifbi", (char**)kwlist, &q, &c, &top_p, &with_neighbors, &n_jobs))
     return NULL;
 
   bool res;
   char* error;
   Py_BEGIN_ALLOW_THREADS;
-  res = self->ptr->build(q, c, top_p, n_jobs, &error);
+  res = self->ptr->build(q, c, top_p, with_neighbors, n_jobs, &error);
   Py_END_ALLOW_THREADS;
   if (!res) {
     PyErr_SetString(PyExc_Exception, error);
