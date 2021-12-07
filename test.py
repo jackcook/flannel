@@ -6,7 +6,7 @@ import sys
 
 n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
 f = 25
-n_items = 1000
+n_items = 5000
 n_trees = 10
 search_k = 200
 
@@ -35,14 +35,14 @@ for a in it:
 
     for i in range(n_items):
         w = p[i]
-        neighbors = t_old.get_nns_by_item(i, 10, search_k=n_items * n_trees)
-        # neighbors = range(10)
-        # if i < 10:
-        #     print(i, neighbors)
+        neighbors = []
+
+        if w > np.percentile(p, 98):
+            neighbors = t_old.get_nns_by_item(i, 10, search_k=n_items * n_trees)
 
         t.add_item(i, X[i], w, neighbors=neighbors)
 
-    t.build(n_trees, 50, top_p=0.05, with_neighbors=True)
+    t.build(n_trees, 50, top_p=0.01, with_neighbors=True)
     t.save("test.ann")
 
     t = FlannelIndex(f, "angular")
