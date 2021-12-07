@@ -96,8 +96,6 @@ typedef signed __int64    int64_t;
 // Compilers need *some* size defined for the v array, and some memory checking tools will flag for buffer overruns if this is set too low.
 #define ANNOYLIB_V_ARRAY_SIZE 65536
 
-#define ANNOYLIB_NEIGHBORS_ARRAY_SIZE 10
-
 #ifndef _MSC_VER
 #define annoylib_popcount __builtin_popcountll
 #else // See #293, #358
@@ -532,7 +530,6 @@ struct Angular : Base {
     bool is_cluster_root;
     S n_descendants;
     S weight;
-    S neighbors[ANNOYLIB_NEIGHBORS_ARRAY_SIZE];
     union {
       S children[2]; // Will possibly store more than 2
       T norm;
@@ -609,7 +606,6 @@ struct DotProduct : Angular {
     bool is_cluster_root;
     S n_descendants;
     S weight;
-    S neighbors[ANNOYLIB_NEIGHBORS_ARRAY_SIZE];
     S children[2]; // Will possibly store more than 2
     T dot_factor;
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -721,7 +717,6 @@ struct Hamming : Base {
     bool is_cluster_root;
     S n_descendants;
     S weight;
-    S neighbors[ANNOYLIB_NEIGHBORS_ARRAY_SIZE];
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
   };
@@ -821,7 +816,6 @@ struct Minkowski : Base {
     bool is_cluster_root;
     S n_descendants;
     S weight;
-    S neighbors[ANNOYLIB_NEIGHBORS_ARRAY_SIZE];
     T a; // need an extra constant term to determine the offset of the plane
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -917,8 +911,8 @@ class AnnoyIndexInterface {
  public:
   // Note that the methods with an **error argument will allocate memory and write the pointer to that string if error is non-NULL
   virtual ~AnnoyIndexInterface() {};
-  virtual bool add_item(S item, const T* w, T weight, int num_neighbors, const S* neighbors, char** error=NULL) = 0;
-  virtual bool build(int q, int c=0, float top_p=1, bool with_neighbors=false, int n_threads=-1, char** error=NULL) = 0;
+  virtual bool add_item(S item, const T* w, T weight, char** error=NULL) = 0;
+  virtual bool build(int q, int c=0, float top_p=1, bool with_neighbors=false, int n_neighbors=0, int n_threads=-1, char** error=NULL) = 0;
   virtual bool unbuild(char** error=NULL) = 0;
   virtual bool save(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual void unload() = 0;
@@ -990,12 +984,12 @@ public:
     return _f;
   }
 
-  bool add_item(S item, const T* w, T weight, int num_neighbors, const S* neighbors, char** error=NULL) {
-    return add_item_impl(item, w, weight, num_neighbors, neighbors, error);
+  bool add_item(S item, const T* w, T weight, char** error=NULL) {
+    return add_item_impl(item, w, weight, error);
   }
 
-  template<typename W, typename X>
-  bool add_item_impl(S item, const W& w, T weight, int num_neighbors, const X& neighbors, char** error=NULL) {
+  template<typename W>
+  bool add_item_impl(S item, const W& w, T weight, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't add an item to a loaded index");
       return false;
@@ -1010,9 +1004,6 @@ public:
     n->children[1] = 0;
     n->n_descendants = 1;
     n->weight = weight;
-
-    for (int z = 0; z < num_neighbors; z++)
-      n->neighbors[z] = neighbors[z];
 
     for (int z = 0; z < _f; z++)
       n->v[z] = w[z];
@@ -1046,7 +1037,7 @@ public:
     return true;
   }
     
-  bool build(int q, int c=0, float top_p=1, bool with_neighbors=false, int n_threads=-1, char** error=NULL) {
+  bool build(int q, int c=0, float top_p=1, bool with_neighbors=false, int n_neighbors=0, int n_threads=-1, char** error=NULL) {
     if (_loaded) {
       set_error_from_string(error, "You can't build a loaded index");
       return false;
@@ -1061,7 +1052,7 @@ public:
 
     _n_nodes = _n_items;
 
-    ThreadedBuildPolicy::template build<S, T>(this, q, c, top_p, with_neighbors, n_threads);
+    ThreadedBuildPolicy::template build<S, T>(this, q, c, top_p, with_neighbors, n_neighbors, n_threads);
 
     // Also, copy the roots into the last segment of the array
     // This way we can load them faster without reading the whole file
@@ -1251,7 +1242,7 @@ public:
     _seed = seed;
   }
 
-  void workload_aware_build(int n_clusters, float top_p, bool with_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
+  void workload_aware_build(int n_clusters, float top_p, bool with_neighbors, int n_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
     if (n_clusters == 0)
       return;
     
@@ -1272,9 +1263,18 @@ public:
       item_ids.insert(items[i].second);
 
       if (with_neighbors) {
-        for (int j = 0; j < ANNOYLIB_NEIGHBORS_ARRAY_SIZE; j++) {
-          S neighbor_id = _get(items[i].second)->neighbors[j];
-          item_ids.insert(neighbor_id);
+        vector<pair<S, T>> distances;
+
+        for (int j = 0; j < _n_items; j++) {
+          T dist = Distance::distance(_get(items[i].second), _get(j), _f);
+          distances.push_back(make_pair(dist, j));
+        }
+
+        auto cmp = [](pair<S, T> a, pair<S, T> b) { return a.first < b.first; };
+        std::sort(distances.begin(), distances.end(), cmp);
+
+        for (int j = 0; j < n_neighbors; j++) {
+          item_ids.insert(distances[j].second);
         }
       }
     }
@@ -1288,6 +1288,8 @@ public:
       items.push_back(make_pair(_get(*it)->weight, *it));
       it++;
     }
+
+    std::cout << "Building clustered trees with " << items.size() << " / " << _n_items << " items" << std::endl;
 
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed - 1);
@@ -1416,6 +1418,8 @@ public:
     threaded_build_policy.lock_roots();
     _roots.insert(_roots.end(), thread_roots.begin(), thread_roots.end());
     threaded_build_policy.unlock_roots();
+
+    std::cout << "Finished building clustered trees" << std::endl;
   }
 
   void thread_build(int q, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
@@ -1696,9 +1700,9 @@ protected:
 class AnnoyIndexSingleThreadedBuildPolicy {
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int c, float top_p, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, int c, float top_p, bool with_neighbors, int n_neighbors, int n_threads) {
     AnnoyIndexSingleThreadedBuildPolicy threaded_build_policy;
-    annoy->workload_aware_build(c, top_p, threaded_build_policy);
+    annoy->workload_aware_build(c, top_p, with_neighbors, n_neighbors, threaded_build_policy);
     annoy->thread_build(q, 0, threaded_build_policy);
   }
 
@@ -1724,7 +1728,7 @@ private:
 
 public:
   template<typename S, typename T, typename D, typename Random>
-  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int c, float top_p, bool with_neighbors, int n_threads) {
+  static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexMultiThreadedBuildPolicy>* annoy, int q, int c, float top_p, bool with_neighbors, int n_neighbors, int n_threads) {
     AnnoyIndexMultiThreadedBuildPolicy threaded_build_policy;
     if (n_threads == -1) {
       // If the hardware_concurrency() value is not well defined or not computable, it returns 0.
@@ -1732,7 +1736,7 @@ public:
       n_threads = std::max(1, (int)std::thread::hardware_concurrency());
     }
 
-    annoy->workload_aware_build(c, top_p, with_neighbors, threaded_build_policy);
+    annoy->workload_aware_build(c, top_p, with_neighbors, n_neighbors, threaded_build_policy);
 
     vector<std::thread> threads(n_threads);
 

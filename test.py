@@ -49,37 +49,27 @@ it = range(n_iter)
 if n_iter != 1:
     it = trange(n_iter)
 
+t_old = AnnoyIndex(f, "angular")
+t = FlannelIndex(f, "angular")
+
+p = weights / weights.sum()
+
+for i in range(n_items):
+    t_old.add_item(i, vecs[i])
+    t.add_item(i, vecs[i], p[i])
+
+t_old.build(n_trees)
+
+t.build(n_trees, 20, top_p=0, with_neighbors=False, n_neighbors=0)
+t.save("test.ann")
+
+t = FlannelIndex(f, "angular")
+t.load("test.ann")
+
 for a in it:
     np.random.seed(a)
 
-    t_old = AnnoyIndex(f, "angular")
-
-    for i in range(n_items):
-        t_old.add_item(i, vecs[i])
-    
-    t_old.build(n_trees)
-
-    t = FlannelIndex(f, "angular")
-
-    p = weights / weights.sum()
-    perc = np.percentile(p, 99.4)
-
-    for i in trange(n_items):
-        w = p[i]
-        neighbors = []
-
-        if w >= perc:
-            neighbors = t_old.get_nns_by_item(i, 10, search_k=n_items * n_trees)
-
-        t.add_item(i, vecs[i], w, neighbors=neighbors)
-
-    t.build(n_trees, 10, top_p=0.005, with_neighbors=True)
-    t.save("test.ann")
-
-    t = FlannelIndex(f, "angular")
-    t.load("test.ann")
-
-    for _ in range(1000):
+    for _ in range(100):
         item_i = np.random.choice(range(n_items), p=p / p.sum())
 
         k = 10
@@ -90,7 +80,7 @@ for a in it:
         old_score = old_matches / k
         assert item_i in old_idx
 
-        new_idx, new_dist = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.01, include_distances=True)
+        new_idx, new_dist = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0, include_distances=True)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
         assert item_i in new_idx
