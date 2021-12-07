@@ -51,16 +51,21 @@ t = FlannelIndex(f, "angular")
 
 p = weights / weights.sum()
 
-for i in range(n_items):
-    t_old.add_item(i, vecs[i])
-    t.add_item(i, vecs[i], p[i])
+if not os.path.exists("test_old.ann"):
+    for i in range(n_items):
+        t_old.add_item(i, vecs[i])
+    
+    t_old.build(n_trees)
+    t_old.save("test_old.ann")
 
-t_old.build(n_trees)
+if not os.path.exists("test.ann"):
+    for i in range(n_items):
+        t.add_item(i, vecs[i], p[i])
 
-t.build(n_trees, 50, top_p=0.05, with_neighbors=True, n_neighbors=k)
-t.save("test.ann")
+    t.build(n_trees, 50, top_p=0.05, with_neighbors=True, n_neighbors=k)
+    t.save("test.ann")
 
-t = FlannelIndex(f, "angular")
+t_old.load("test_old.ann")
 t.load("test.ann")
 
 def get_gt_idx(item_i):

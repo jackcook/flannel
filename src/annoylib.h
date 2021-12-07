@@ -1247,13 +1247,13 @@ public:
       return;
     
     // Get top percentile of items by weight
-    vector<pair<S, T>> items;
+    vector<pair<T, S>> items;
 
     for (int i = 0; i < _n_items; i++) {
       items.push_back(make_pair(_get(i)->weight, i));
     }
 
-    auto cmp = [](pair<S, T> a, pair<S, T> b) { return a.first > b.first; };
+    auto cmp = [](pair<T, S> a, pair<T, S> b) { return a.first > b.first; };
     std::sort(items.begin(), items.end(), cmp);
 
     // Add neighbors of top percentile items to clusters
@@ -1263,14 +1263,14 @@ public:
       item_ids.insert(items[i].second);
 
       if (with_neighbors) {
-        vector<pair<S, T>> distances;
+        vector<pair<T, S>> distances;
 
         for (int j = 0; j < _n_items; j++) {
           T dist = Distance::distance(_get(items[i].second), _get(j), _f);
           distances.push_back(make_pair(dist, j));
         }
 
-        auto cmp = [](pair<S, T> a, pair<S, T> b) { return a.first < b.first; };
+        auto cmp = [](pair<T, S> a, pair<T, S> b) { return a.first < b.first; };
         std::sort(distances.begin(), distances.end(), cmp);
 
         for (int j = 0; j < n_neighbors; j++) {
