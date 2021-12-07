@@ -36,10 +36,14 @@ f = np.load("glove_vecs.npz")
 vecs = f["vecs"]
 weights = f["weights"]
 
-n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
 f = 25
+# n_items = 10000
+# vecs = np.random.randn(n_items, f)
+# weights = np.random.zipf(2, size=len(vecs))
+
+n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
 n_trees = 10
-search_k = 1000
+search_k = 100
 n_items = vecs.shape[0]
 k = 10
 
@@ -62,7 +66,7 @@ if not os.path.exists("test.ann"):
     for i in range(n_items):
         t.add_item(i, vecs[i], p[i])
 
-    t.build(n_trees, 50, top_p=0.05, with_neighbors=True, n_neighbors=k)
+    t.build(n_trees, 100, top_p=0.05, with_neighbors=True, n_neighbors=k)
     t.save("test.ann")
 
 t_old.load("test_old.ann")
@@ -71,7 +75,7 @@ t.load("test.ann")
 def get_gt_idx(item_i):
     if item_i in nearest:
         return nearest[item_i]
-    
+
     gt_idx = t_old.get_nns_by_item(item_i, k, search_k=n_items * n_trees)
     nearest[item_i] = gt_idx
 
@@ -81,6 +85,13 @@ nearest = {}
 
 if os.path.exists("nearest.pkl"):
     nearest = pickle.load(open("nearest.pkl", "rb"))
+
+# item_i = 3
+# new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.00)
+
+# print(get_gt_idx(item_i))
+# print(new_idx)
+# assert 0
 
 it = range(n_iter)
 
@@ -99,7 +110,7 @@ for a in it:
         old_score = old_matches / k
         assert item_i in old_idx
 
-        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.1)
+        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
         assert item_i in new_idx

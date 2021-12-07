@@ -535,6 +535,7 @@ struct Angular : Base {
       T norm;
     };
     T v[ANNOYLIB_V_ARRAY_SIZE];
+    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
   template<typename S, typename T>
   static inline T distance(const Node<S, T>* x, const Node<S, T>* y, int f) {
@@ -609,6 +610,7 @@ struct DotProduct : Angular {
     S children[2]; // Will possibly store more than 2
     T dot_factor;
     T v[ANNOYLIB_V_ARRAY_SIZE];
+    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
 
   static const char* name() {
@@ -719,6 +721,7 @@ struct Hamming : Base {
     T weight;
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
+    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
 
   static const size_t max_iterations = 20;
@@ -819,6 +822,7 @@ struct Minkowski : Base {
     T a; // need an extra constant term to determine the offset of the plane
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
+    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
   template<typename S, typename T>
   static inline T margin(const Node<S, T>* n, const T* y, int f) {
@@ -918,8 +922,8 @@ class AnnoyIndexInterface {
   virtual void unload() = 0;
   virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual T get_distance(S i, S j) const = 0;
-  virtual void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
-  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_n_trees() const = 0;
   virtual void verbose(bool v) = 0;
@@ -1210,14 +1214,14 @@ public:
     return D::normalized_distance(D::distance(_get(i), _get(j), _f));
   }
 
-  void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
+  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
     // TODO: handle OOB
     const Node* m = _get(item);
-    _get_all_nns(m->v, n, search_k, clusters_p, result, distances);
+    _get_all_nns(m->v, n, search_k, result, distances);
   }
 
-  void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
-    _get_all_nns(w, n, search_k, clusters_p, result, distances);
+  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+    _get_all_nns(w, n, search_k, result, distances);
   }
 
   S get_n_items() const {
@@ -1412,7 +1416,23 @@ public:
       }
       threaded_build_policy.unlock_shared_nodes();
 
-      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
+      int tree_i = _make_tree(indices, true, _random, threaded_build_policy);
+
+      for (int j = 0; j < _f; j++) {
+        _get(tree_i)->v[j] = 0;
+      }
+
+      for (size_t i = 0; i < indices.size(); i++) {
+        for (int j = 0; j < _f; j++) {
+          _get(tree_i)->v[j] += _get(indices[i])->v[j];
+        }
+      }
+
+      for (int j = 0; j < _f; j++) {
+        _get(tree_i)->v[j] /= indices.size();
+      }
+
+      thread_roots.push_back(tree_i);
     }
 
     threaded_build_policy.lock_roots();
@@ -1613,30 +1633,38 @@ protected:
     return item;
   }
 
-  void _get_all_nns(const T* v, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
+  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);
     D::init_node(v_node, _f);
 
     std::priority_queue<pair<T, pair<S, S>>> q;
-    std::priority_queue<pair<T, pair<S, S>>> clusters_q;
 
     if (search_k == -1) {
       search_k = n * _roots.size();
     }
 
+    std::vector<pair<T, S>> cluster_root_dists;
+
     for (size_t i = 0; i < _roots.size(); i++) {
       auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
 
-      if (_get(_roots[i])->is_cluster_root)
-        clusters_q.push(p);
-      else
+      if (i >= 10) {
+        T dist = euclidean_distance(_get(_roots[i])->v, v, _f);
+        cluster_root_dists.push_back(make_pair(dist, _roots[i]));
+      } else {
         q.push(p);
+      }
     }
 
+    auto cmp = [](pair<T, S> a, pair<T, S> b) { return a.first < b.first; };
+    std::sort(cluster_root_dists.begin(), cluster_root_dists.end(), cmp);
+
+    q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(-1, cluster_root_dists[0].second)));
+
     std::vector<S> nns;
-    while (nns.size() < (size_t)((float) search_k * (1 - clusters_p)) && !q.empty()) {
+    while (nns.size() < (size_t)search_k && !q.empty()) {
       const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
       S i = top.second.second;
@@ -1651,24 +1679,6 @@ protected:
         T margin = D::margin(nd, v, _f);
         q.push(make_pair(D::pq_distance(d, margin, 1), make_pair(top.second.first, static_cast<S>(nd->children[1]))));
         q.push(make_pair(D::pq_distance(d, margin, 0), make_pair(top.second.first, static_cast<S>(nd->children[0]))));
-      }
-    }
-
-    while (nns.size() < (size_t)((float) search_k) && !clusters_q.empty()) {
-      const pair<T, pair<S, S>>& top = clusters_q.top();
-      T d = top.first;
-      S i = top.second.second;
-      Node* nd = _get(i);
-      clusters_q.pop();
-      if (nd->n_descendants == 1 && i < _n_items) {
-        nns.push_back(i);
-      } else if (nd->n_descendants <= _K) {
-        const S* dst = nd->children;
-        nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
-      } else {
-        T margin = D::margin(nd, v, _f);
-        clusters_q.push(make_pair(D::pq_distance(d, margin, 1), make_pair(top.second.first, static_cast<S>(nd->children[1]))));
-        clusters_q.push(make_pair(D::pq_distance(d, margin, 0), make_pair(top.second.first, static_cast<S>(nd->children[0]))));
       }
     }
 
