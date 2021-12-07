@@ -17,5 +17,8 @@ MANIFEST
 *.annoy
 *.idx
 *.hdf5
+*.pkl
+*.npz
+*.csv
 
 .eggs

@@ -46,11 +46,6 @@ k = 10
 old_scores = []
 new_scores = []
 
-it = range(n_iter)
-
-if n_iter != 1:
-    it = trange(n_iter)
-
 t_old = AnnoyIndex(f, "angular")
 t = FlannelIndex(f, "angular")
 
@@ -62,7 +57,7 @@ for i in range(n_items):
 
 t_old.build(n_trees)
 
-t.build(n_trees, 20, top_p=0, with_neighbors=False, n_neighbors=0)
+t.build(n_trees, 50, top_p=0.05, with_neighbors=True, n_neighbors=k)
 t.save("test.ann")
 
 t = FlannelIndex(f, "angular")
@@ -82,6 +77,11 @@ nearest = {}
 if os.path.exists("nearest.pkl"):
     nearest = pickle.load(open("nearest.pkl", "rb"))
 
+it = range(n_iter)
+
+if n_iter != 1:
+    it = trange(n_iter)
+
 for a in it:
     np.random.seed(a)
 
@@ -94,7 +94,7 @@ for a in it:
         old_score = old_matches / k
         assert item_i in old_idx
 
-        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0)
+        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.1)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
         assert item_i in new_idx
