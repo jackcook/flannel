@@ -529,7 +529,7 @@ struct Angular : Base {
     bool is_root;
     bool is_cluster_root;
     S n_descendants;
-    S weight;
+    T weight;
     union {
       S children[2]; // Will possibly store more than 2
       T norm;
@@ -605,7 +605,7 @@ struct DotProduct : Angular {
     bool is_root;
     bool is_cluster_root;
     S n_descendants;
-    S weight;
+    T weight;
     S children[2]; // Will possibly store more than 2
     T dot_factor;
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -716,7 +716,7 @@ struct Hamming : Base {
     bool is_root;
     bool is_cluster_root;
     S n_descendants;
-    S weight;
+    T weight;
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
   };
@@ -815,7 +815,7 @@ struct Minkowski : Base {
     bool is_root;
     bool is_cluster_root;
     S n_descendants;
-    S weight;
+    T weight;
     T a; // need an extra constant term to determine the offset of the plane
     S children[2];
     T v[ANNOYLIB_V_ARRAY_SIZE];
@@ -1327,7 +1327,7 @@ public:
     for (int iter = 0; iter < 200; iter++) {
       for (unsigned long a = 0; a < centroids.size(); a++) {
         for (size_t b = 0; b < items.size(); b++) {
-          T dist = Distance::distance(centroids[a], _get(items[b].second), _f);
+          T dist = euclidean_distance(centroids[a]->v, _get(items[b].second)->v, _f);
 
           if (dist < minDists[b]) {
             minDists[b] = dist;
@@ -1619,8 +1619,8 @@ protected:
     memcpy(v_node->v, v, sizeof(T) * _f);
     D::init_node(v_node, _f);
 
-    std::priority_queue<pair<T, pair<S, S>> > q;
-    std::priority_queue<pair<T, pair<S, S>> > clusters_q;
+    std::priority_queue<pair<T, pair<S, S>>> q;
+    std::priority_queue<pair<T, pair<S, S>>> clusters_q;
 
     if (search_k == -1) {
       search_k = n * _roots.size();
@@ -1678,7 +1678,7 @@ protected:
     vector<pair<T, S> > nns_dist;
     S last = -1;
     for (size_t i = 0; i < nns.size(); i++) {
-      S j = nns[i]; 
+      S j = nns[i];
       if (j == last)
         continue;
       last = j;
