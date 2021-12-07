@@ -1636,7 +1636,6 @@ protected:
       const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
       S i = top.second.second;
-      // std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
       Node* nd = _get(i);
       q.pop();
       if (nd->n_descendants == 1 && i < _n_items) {
@@ -1651,11 +1650,10 @@ protected:
       }
     }
 
-    while (nns.size() < (size_t)((float) search_k * clusters_p) && !clusters_q.empty()) {
+    while (nns.size() < (size_t)((float) search_k) && !clusters_q.empty()) {
       const pair<T, pair<S, S>>& top = clusters_q.top();
       T d = top.first;
       S i = top.second.second;
-      // std::cout << "distance: " << d << ", tree: " << top.second.first << std::endl;
       Node* nd = _get(i);
       clusters_q.pop();
       if (nd->n_descendants == 1 && i < _n_items) {

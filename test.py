@@ -58,7 +58,7 @@ for a in it:
     old_score = old_matches / k
     assert item_i in old_idx
 
-    new_idx, new_dist = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=1, include_distances=True)
+    new_idx, new_dist = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.5, include_distances=True)
     new_matches = len(set(gt_idx).intersection(set(new_idx)))
     new_score = new_matches / k
     assert item_i in new_idx
