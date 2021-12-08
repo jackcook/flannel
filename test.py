@@ -36,6 +36,9 @@ f = np.load("glove_vecs.npz")
 vecs = f["vecs"]
 weights = f["weights"]
 
+vecs = vecs[:100000]
+weights = weights[:100000]
+
 f = 25
 # n_items = 10000
 # vecs = np.random.randn(n_items, f)
@@ -45,6 +48,7 @@ n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
 n_trees = 10
 search_k = 100
 n_items = vecs.shape[0]
+n_clusters = 100
 k = 10
 
 old_scores = []
@@ -66,7 +70,7 @@ if not os.path.exists("test.ann"):
     for i in range(n_items):
         t.add_item(i, vecs[i], p[i])
 
-    t.build(n_trees, 100, top_p=0.05, with_neighbors=True, n_neighbors=k)
+    t.build(n_trees, n_clusters, top_p=0.05, with_neighbors=True, n_neighbors=k)
     t.save("test.ann")
 
 t_old.load("test_old.ann")
@@ -101,8 +105,10 @@ if n_iter != 1:
 for a in it:
     np.random.seed(a)
 
-    for _ in range(100):
+    for _ in range(1):
         item_i = np.random.choice(range(n_items), p=p / p.sum())
+        item_i = np.argmax(p)
+        print(item_i)
         gt_idx = get_gt_idx(item_i)
 
         old_idx = t_old.get_nns_by_item(item_i, k, search_k=search_k)
@@ -113,7 +119,9 @@ for a in it:
         new_idx = t.get_nns_by_item(item_i, k, search_k=search_k)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
-        assert item_i in new_idx
+        print(new_idx)
+        # assert item_i in new_idx
+        # assert 0
 
         old_scores.append(old_score)
         new_scores.append(new_score)

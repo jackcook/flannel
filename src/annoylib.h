@@ -95,6 +95,7 @@ typedef signed __int64    int64_t;
 // We let the v array in the Node struct take whatever space is needed, so this is a mostly insignificant number.
 // Compilers need *some* size defined for the v array, and some memory checking tools will flag for buffer overruns if this is set too low.
 #define ANNOYLIB_V_ARRAY_SIZE 65536
+#define ANNOYLIB_V_SPACE_SIZE 16
 
 #ifndef _MSC_VER
 #define annoylib_popcount __builtin_popcountll
@@ -199,6 +200,14 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
     ++x;
     ++y;
   }
+  return d;
+}
+
+template<typename T>
+inline T euclidean_distance_nonmod(const T* x, const T* y, int f) {
+  T d = 0.0;
+  for (int i = 0; i < f; ++i)
+    d += (x[i] - y[i]) * (x[i] - y[i]);
   return d;
 }
 
@@ -365,77 +374,81 @@ inline T get_norm(T* v, int f) {
   return sqrt(dot(v, v, f));
 }
 
-// template<typename T, typename Random, typename Distance, typename Node>
-// inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
-//   vector<Node*> centroids;
+template<typename T, typename Random, typename Distance, typename Node>
+inline void two_means_kmeans(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
+  vector<Node*> centroids;
 
-//   size_t count = nodes.size();
-//   size_t i = random.index(count);
-//   size_t j = random.index(count-1);
-//   j += (j == i); // ensure that i != j
+  size_t count = nodes.size();
+  size_t i = random.index(count);
+  size_t j = random.index(count-1);
+  j += (j == i); // ensure that i != j
 
-//   Distance::template copy_node<T, Node>(p, nodes[i], f);
-//   Distance::template copy_node<T, Node>(q, nodes[j], f);
+  Distance::template copy_node<T, Node>(p, nodes[i], f);
+  Distance::template copy_node<T, Node>(q, nodes[j], f);
 
-//   if (cosine) { Distance::template normalize<T, Node>(p, f); Distance::template normalize<T, Node>(q, f); }
-//   Distance::init_node(p, f);
-//   Distance::init_node(q, f);
+  if (cosine) { Distance::template normalize<T, Node>(p, f); Distance::template normalize<T, Node>(q, f); }
+  Distance::init_node(p, f);
+  Distance::init_node(q, f);
 
-//   centroids.push_back(p);
-//   centroids.push_back(q);
+  centroids.push_back(p);
+  centroids.push_back(q);
   
-//   vector<int> clusters;
-//   vector<T> minDists;
+  vector<int> clusters;
+  vector<T> minDists;
 
-//   for (unsigned long k = 0; k < nodes.size(); k++) {
-//     clusters.push_back(-1);
-//     minDists.push_back(__DBL_MAX__);
-//   }
+  for (size_t k = 0; k < nodes.size(); k++) {
+    clusters.push_back(-1);
+    minDists.push_back(__DBL_MAX__);
+  }
 
-//   for (int iter = 0; iter < 200; iter++) {
-//     for (unsigned long a = 0; a < centroids.size(); a++) {
-//       for (unsigned long b = 0; b < nodes.size(); b++) {
-//         T dist = Distance::distance(centroids[a], nodes[b], f);
+  for (int iter = 0; iter < 200; iter++) {
+    for (size_t a = 0; a < centroids.size(); a++) {
+      for (size_t b = 0; b < nodes.size(); b++) {
+        T dist = euclidean_distance_nonmod(centroids[a]->v, nodes[b]->v, f);
 
-//         if (dist < minDists[b]) {
-//           minDists[b] = dist;
-//           clusters[b] = a;
-//         }
-//       }
-//     }
+        if (dist < minDists[b]) {
+          minDists[b] = dist;
+          clusters[b] = a;
+        }
+      }
+    }
 
-//     vector<int> nPoints;
-//     vector<vector<T>> sums;
+    vector<int> nPoints;
+    vector<vector<T>> sums;
 
-//     // Initialise with zeroes
-//     for (unsigned long k = 0; k < centroids.size(); ++k) {
-//       nPoints.push_back(0);
-//       sums.push_back(vector<T>());
+    // Initialise with zeroes
+    for (size_t k = 0; k < centroids.size(); ++k) {
+      nPoints.push_back(0);
+      sums.push_back(vector<T>());
 
-//       for (int l = 0; l < f; ++l) {
-//         sums[k].push_back(0);
-//       }
-//     }
+      for (int l = 0; l < f; ++l)
+        sums[k].push_back(0);
+    }
 
-//     // Iterate over points to append data to centroids
-//     for (unsigned long k = 0; k < nodes.size(); k++) {
-//       int c = clusters[k];
-//       nPoints[c]++;
+    // Iterate over points to append data to centroids
+    for (size_t k = 0; k < nodes.size(); k++) {
+      int c = clusters[k];
+      nPoints[c]++;
 
-//       for (int l = 0; l < f; l++) {
-//         sums[c][l] += nodes[k]->v[l];
-//       }
-//     }
+      for (int l = 0; l < f; l++)
+        sums[c][l] += nodes[k]->v[l];
+    }
 
-//     for (unsigned long k = 0; k < centroids.size(); k++) {
-//       for (int l = 0; l < f; l++) {
-//         centroids[k]->v[l] = sums[k][l] / ((T) nPoints[k]);
-//       }
+    for (size_t k = 0; k < centroids.size(); k++) {
+      for (int l = 0; l < f; l++)
+        centroids[k]->v[l] = sums[k][l] / ((T) nPoints[k]);
 
-//       Distance::init_node(centroids[k], f);
-//     }
-//   }
-// }
+      Distance::init_node(centroids[k], f);
+    }
+  }
+
+  // for (size_t k = 0; k < centroids.size(); k++)
+  //   for (int l = 0; l < f; l++)
+  //     std::cout << centroids[k]->v[l] << " ";
+  
+  // std::cout << std::endl;
+}
+
 template<typename T, typename Random, typename Distance, typename Node>
 inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool cosine, Node* p, Node* q) {
   /*
@@ -534,8 +547,8 @@ struct Angular : Base {
       S children[2]; // Will possibly store more than 2
       T norm;
     };
+    T v_space[ANNOYLIB_V_SPACE_SIZE];
     T v[ANNOYLIB_V_ARRAY_SIZE];
-    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
   template<typename S, typename T>
   static inline T distance(const Node<S, T>* x, const Node<S, T>* y, int f) {
@@ -562,12 +575,18 @@ struct Angular : Base {
       return (bool)random.flip();
   }
   template<typename S, typename T, typename Random>
-  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
-    Node<S, T>* p = (Node<S, T>*)alloca(s);
-    Node<S, T>* q = (Node<S, T>*)alloca(s);
-    two_means<T, Random, Angular, Node<S, T> >(nodes, f, random, true, p, q);
-    for (int z = 0; z < f; z++)
-      n->v[z] = p->v[z] - q->v[z];
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
+    if (use_kmeans) {
+      two_means_kmeans<T, Random, Angular, Node<S, T>>(nodes, f, random, true, p, q);
+
+      for (int z = 0; z < f; z++)
+        n->v[z] = (p->v[z] + q->v[z]) / 2;
+    } else {
+      two_means<T, Random, Angular, Node<S, T>>(nodes, f, random, true, p, q);
+
+      for (int z = 0; z < f; z++)
+        n->v[z] = p->v[z] - q->v[z];
+    }
     Base::normalize<T, Node<S, T> >(n, f);
   }
   template<typename T>
@@ -609,8 +628,8 @@ struct DotProduct : Angular {
     T weight;
     S children[2]; // Will possibly store more than 2
     T dot_factor;
+    T v_space[ANNOYLIB_V_SPACE_SIZE];
     T v[ANNOYLIB_V_ARRAY_SIZE];
-    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
 
   static const char* name() {
@@ -637,12 +656,13 @@ struct DotProduct : Angular {
   }
 
   template<typename S, typename T, typename Random>
-  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
-    Node<S, T>* p = (Node<S, T>*)alloca(s);
-    Node<S, T>* q = (Node<S, T>*)alloca(s);
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
     DotProduct::zero_value(p); 
     DotProduct::zero_value(q);
-    two_means<T, Random, DotProduct, Node<S, T> >(nodes, f, random, true, p, q);
+    if (use_kmeans)
+      two_means_kmeans<T, Random, DotProduct, Node<S, T>>(nodes, f, random, true, p, q);
+    else
+      two_means<T, Random, DotProduct, Node<S, T> >(nodes, f, random, true, p, q);
     for (int z = 0; z < f; z++)
       n->v[z] = p->v[z] - q->v[z];
     n->dot_factor = p->dot_factor - q->dot_factor;
@@ -720,8 +740,8 @@ struct Hamming : Base {
     S n_descendants;
     T weight;
     S children[2];
+    T v_space[ANNOYLIB_V_SPACE_SIZE];
     T v[ANNOYLIB_V_ARRAY_SIZE];
-    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
 
   static const size_t max_iterations = 20;
@@ -765,7 +785,7 @@ struct Hamming : Base {
     return margin(n, y, f);
   }
   template<typename S, typename T, typename Random>
-  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
     size_t cur_size = 0;
     size_t i = 0;
     int dim = f * 8 * sizeof(T);
@@ -821,8 +841,8 @@ struct Minkowski : Base {
     T weight;
     T a; // need an extra constant term to determine the offset of the plane
     S children[2];
+    T v_space[ANNOYLIB_V_SPACE_SIZE];
     T v[ANNOYLIB_V_ARRAY_SIZE];
-    T centroid[ANNOYLIB_V_ARRAY_SIZE];
   };
   template<typename S, typename T>
   static inline T margin(const Node<S, T>* n, const T* y, int f) {
@@ -855,10 +875,11 @@ struct Euclidean : Minkowski {
     return euclidean_distance(x->v, y->v, f);    
   }
   template<typename S, typename T, typename Random>
-  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
-    Node<S, T>* p = (Node<S, T>*)alloca(s);
-    Node<S, T>* q = (Node<S, T>*)alloca(s);
-    two_means<T, Random, Euclidean, Node<S, T> >(nodes, f, random, false, p, q);
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
+    if (use_kmeans)
+      two_means_kmeans<T, Random, Euclidean, Node<S, T>>(nodes, f, random, false, p, q);
+    else
+      two_means<T, Random, Euclidean, Node<S, T> >(nodes, f, random, false, p, q);
 
     for (int z = 0; z < f; z++)
       n->v[z] = p->v[z] - q->v[z];
@@ -886,10 +907,11 @@ struct Manhattan : Minkowski {
     return manhattan_distance(x->v, y->v, f);
   }
   template<typename S, typename T, typename Random>
-  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
-    Node<S, T>* p = (Node<S, T>*)alloca(s);
-    Node<S, T>* q = (Node<S, T>*)alloca(s);
-    two_means<T, Random, Manhattan, Node<S, T> >(nodes, f, random, false, p, q);
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
+    if (use_kmeans)
+      two_means_kmeans<T, Random, Manhattan, Node<S, T>>(nodes, f, random, false, p, q);
+    else
+      two_means<T, Random, Manhattan, Node<S, T> >(nodes, f, random, false, p, q);
 
     for (int z = 0; z < f; z++)
       n->v[z] = p->v[z] - q->v[z];
@@ -977,7 +999,8 @@ public:
     _s = offsetof(Node, v) + _f * sizeof(T); // Size of each node
     _verbose = false;
     _built = false;
-    _K = (S) (((size_t) (_s - offsetof(Node, children))) / sizeof(S)); // Max number of descendants to fit into node
+    _K = 10;
+    // _K = (S) (((size_t) (_s - offsetof(Node, children))) / sizeof(S)); // Max number of descendants to fit into node
     reinitialize(); // Reset everything
   }
   ~AnnoyIndex() {
@@ -1206,6 +1229,7 @@ public:
     _loaded = true;
     _built = true;
     _n_items = m;
+    // std::cout << "found " << _roots.size() << " roots with degree " << m << std::endl;
     if (_verbose) annoylib_showUpdate("found %lu roots with degree %d\n", _roots.size(), m);
     return true;
   }
@@ -1249,7 +1273,7 @@ public:
   void workload_aware_build(int n_clusters, float top_p, bool with_neighbors, int n_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
     if (n_clusters == 0)
       return;
-    
+
     // Get top percentile of items by weight
     vector<pair<T, S>> items;
 
@@ -1293,7 +1317,7 @@ public:
       it++;
     }
 
-    std::cout << "Building clustered trees with " << items.size() << " / " << _n_items << " items" << std::endl;
+    // std::cout << "Building clustered trees with " << items.size() << " / " << _n_items << " items" << std::endl;
 
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed - 1);
@@ -1303,12 +1327,13 @@ public:
 
     // fill centroid_indices with n_clusters unique ints
     for (int i = 0; i < n_clusters; i++) {
-      int centroid_index = _random.index(_n_items);
+      int centroid_index = items[_random.index(items.size())].second;
 
       while (std::find(centroid_indices.begin(), centroid_indices.end(), centroid_index) != centroid_indices.end()) {
-        centroid_index = _random.index(_n_items);
+        centroid_index = items[_random.index(items.size())].second;
       }
 
+      // std::cout << "cluster " << i << " starting with index " << centroid_index << std::endl;
       centroid_indices.push_back(centroid_index);
 
       Node* new_node = (Node *)alloca(_s);
@@ -1331,7 +1356,10 @@ public:
     for (int iter = 0; iter < 200; iter++) {
       for (unsigned long a = 0; a < centroids.size(); a++) {
         for (size_t b = 0; b < items.size(); b++) {
-          T dist = euclidean_distance(centroids[a]->v, _get(items[b].second)->v, _f);
+          T dist = euclidean_distance_nonmod(centroids[a]->v, _get(items[b].second)->v, _f);
+
+          // if (iter == 0)
+          //     std::cout << "considering item " << items[b].second << " to cluster " << a << " with dist " << dist << std::endl;
 
           if (dist < minDists[b]) {
             minDists[b] = dist;
@@ -1370,6 +1398,8 @@ public:
 
         Distance::init_node(centroids[k], _f);
       }
+
+      // std::cout << "iter " << iter << " -- " << "cluster 0 has " << nPoints[0] << " points" << std::endl;
     }
 
     if (_verbose) {
@@ -1403,8 +1433,12 @@ public:
     }
 
     vector<S> thread_roots;
+    int real_cluster = 0;
     for (int cluster = 0; cluster < n_clusters; cluster++) {
-      if (cluster_counts[cluster] == 0) continue;
+      if (cluster_counts[cluster] == 0) {
+        std::cout << "cluster " << cluster << " has no points" << std::endl;
+        continue;
+      }
       if (_verbose) annoylib_showUpdate("pass %zd...\n", thread_roots.size());
 
       vector<S> indices;
@@ -1412,27 +1446,15 @@ public:
       for (size_t i = 0; i < items.size(); i++) {
         if (_get(items[i].second)->n_descendants >= 1 && clusters[i] == cluster) { // Issue #223
           indices.push_back(items[i].second);
+
+          // if (items[i].second == 3) {
+          //   std::cout << "item 3 is in cluster " << real_cluster << std::endl;
+          // }
         }
       }
       threaded_build_policy.unlock_shared_nodes();
-
-      int tree_i = _make_tree(indices, true, _random, threaded_build_policy);
-
-      for (int j = 0; j < _f; j++) {
-        _get(tree_i)->v[j] = 0;
-      }
-
-      for (size_t i = 0; i < indices.size(); i++) {
-        for (int j = 0; j < _f; j++) {
-          _get(tree_i)->v[j] += _get(indices[i])->v[j];
-        }
-      }
-
-      for (int j = 0; j < _f; j++) {
-        _get(tree_i)->v[j] /= indices.size();
-      }
-
-      thread_roots.push_back(tree_i);
+      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy, true));
+      real_cluster++;
     }
 
     threaded_build_policy.lock_roots();
@@ -1471,8 +1493,7 @@ public:
         }
       }
       threaded_build_policy.unlock_shared_nodes();
-
-      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
+      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy, false));
     }
 
     threaded_build_policy.lock_roots();
@@ -1526,7 +1547,7 @@ protected:
     return std::max(f, 1-f);
   }
 
-  S _make_tree(const vector<S>& indices, bool is_root, Random& _random, ThreadedBuildPolicy& threaded_build_policy) {
+  S _make_tree(const vector<S>& indices, bool is_root, Random& _random, ThreadedBuildPolicy& threaded_build_policy, bool use_kmeans) {
     // The basic rule is that if we have <= _K items, then it's a leaf node, otherwise it's a split node.
     // There's some regrettable complications caused by the problem that root nodes have to be "special":
     // 1. We identify root nodes by the arguable logic that _n_items == n->n_descendants, regardless of how many descendants they actually have
@@ -1552,7 +1573,25 @@ protected:
       // Using memcpy instead of std::copy for MSVC compatibility. #235
       // Only copy when necessary to avoid crash in MSVC 9. #293
       if (!indices.empty())
-        memcpy(m->children, &indices[0], indices.size() * sizeof(S));
+        memcpy(&m->children[1], &indices[0], indices.size() * sizeof(S));
+
+      if (use_kmeans) {
+        // Calculate centroid
+        for (S z = 0; z < _f; z++)
+          m->v[z] = 0;
+
+        for (S i = 0; i < (S)indices.size(); i++) {
+          for (S z = 0; z < _f; z++)
+            m->v[z] += _get(indices[i])->v[z];
+        }
+
+        for (S z = 0; z < _f; z++)
+          m->v[z] /= indices.size();
+        
+        // D::template zero_value<Node>(v_node);
+        // memcpy(v_node->v, v, sizeof(T) * _f);
+        D::init_node(m, _f);
+      }
 
       threaded_build_policy.unlock_shared_nodes();
       return item;
@@ -1573,22 +1612,43 @@ protected:
     for (int attempt = 0; attempt < 3; attempt++) {
       children_indices[0].clear();
       children_indices[1].clear();
-      D::create_split(children, _f, _s, _random, m);
 
-      for (size_t i = 0; i < indices.size(); i++) {
-        S j = indices[i];
-        Node* n = _get(j);
-        if (n) {
-          bool side = D::side(m, n->v, _f, _random);
-          children_indices[side].push_back(j);
-        } else {
-          annoylib_showUpdate("No node for index %d?\n", j);
+      Node* p = (Node*)alloca(_s);
+      Node* q = (Node*)alloca(_s);
+
+      D::create_split(children, _f, _s, _random, m, p, q, use_kmeans);
+
+      if (use_kmeans) {
+        for (size_t i = 0; i < indices.size(); i++) {
+          S j = indices[i];
+          Node* n = _get(j);
+          if (n) {
+            T dist0 = euclidean_distance_nonmod(n->v, p->v, _f);
+            T dist1 = euclidean_distance_nonmod(n->v, q->v, _f);
+
+            if (dist0 < dist1)
+              children_indices[0].push_back(j);
+            else
+              children_indices[1].push_back(j);
+          }
+        }
+      } else {
+        for (size_t i = 0; i < indices.size(); i++) {
+          S j = indices[i];
+          Node* n = _get(j);
+          if (n) {
+            bool side = D::side(m, n->v, _f, _random);
+            children_indices[side].push_back(j);
+          } else {
+            annoylib_showUpdate("No node for index %d?\n", j);
+          }
         }
       }
 
       if (_split_imbalance(children_indices[0], children_indices[1]) < 0.95)
         break;
     }
+
     threaded_build_policy.unlock_shared_nodes();
 
     // If we didn't find a hyperplane, just randomize sides as a last option
@@ -1618,7 +1678,7 @@ protected:
     m->is_cluster_root = (S)indices.size() != _n_items;
     for (int side = 0; side < 2; side++) {
       // run _make_tree for the smallest child first (for cache locality)
-      m->children[side^flip] = _make_tree(children_indices[side^flip], false, _random, threaded_build_policy);
+      m->children[side^flip] = _make_tree(children_indices[side^flip], false, _random, threaded_build_policy, use_kmeans);
     }
 
     threaded_build_policy.lock_n_nodes();
@@ -1639,32 +1699,33 @@ protected:
     memcpy(v_node->v, v, sizeof(T) * _f);
     D::init_node(v_node, _f);
 
+    float clusters_p = 0.05;
+
     std::priority_queue<pair<T, pair<S, S>>> q;
+    std::priority_queue<pair<T, pair<S, S>>> clusters_q;
 
     if (search_k == -1) {
       search_k = n * _roots.size();
     }
 
-    std::vector<pair<T, S>> cluster_root_dists;
-
     for (size_t i = 0; i < _roots.size(); i++) {
-      auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
-
       if (i >= 10) {
-        T dist = euclidean_distance(_get(_roots[i])->v, v, _f);
-        cluster_root_dists.push_back(make_pair(dist, _roots[i]));
+        T dist = euclidean_distance_nonmod(_get(_roots[i])->v, v, _f);
+        auto p = make_pair(-dist, make_pair(i, _roots[i]));
+        clusters_q.push(p);
+
+        // for (int z = 0; z < _f; z++)
+        //   std::cout << _get(_roots[i])->v[z] << " ";
+        
+        // std::cout << std::endl;
       } else {
+        auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
         q.push(p);
       }
     }
 
-    auto cmp = [](pair<T, S> a, pair<T, S> b) { return a.first < b.first; };
-    std::sort(cluster_root_dists.begin(), cluster_root_dists.end(), cmp);
-
-    q.push(make_pair(Distance::template pq_initial_value<T>(), make_pair(-1, cluster_root_dists[0].second)));
-
     std::vector<S> nns;
-    while (nns.size() < (size_t)search_k && !q.empty()) {
+    while (nns.size() < (size_t)((float) search_k * (1 - clusters_p)) && !q.empty()) {
       const pair<T, pair<S, S>>& top = q.top();
       T d = top.first;
       S i = top.second.second;
@@ -1682,6 +1743,43 @@ protected:
       }
     }
 
+    while (nns.size() < (size_t)search_k && !clusters_q.empty()) {
+      const pair<T, pair<S, S>>& top = clusters_q.top();
+      // std::cout << "popping " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
+      // T d = top.first;
+      S i = top.second.second;
+      Node* nd = _get(i);
+      clusters_q.pop();
+      if (nd->n_descendants == 1 && i < _n_items) {
+        std::cout << "pushing back " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
+        nns.push_back(i);
+      } else if (nd->n_descendants <= _K) {
+        std::cout << "adding several " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
+        const S* dst = &nd->children[1];
+        nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
+
+        std::cout << "n_descendants = " << nd->n_descendants << " _K = " << _K << std::endl;
+
+        for (int k = 0; k < nd->n_descendants; k++) {
+          std::cout << "k=" << k << " adding " << dst[k] << std::endl;
+        }
+      } else {
+        std::cout << "recursing " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
+
+        const S* dst = &nd->children[0];
+
+        if (dst[0] > _n_items) {
+          dst++;
+        }
+
+        T dist0 = euclidean_distance_nonmod(_get(dst[0])->v, v, _f);
+        clusters_q.push(make_pair(-dist0, make_pair(top.second.first, static_cast<S>(dst[0]))));
+
+        T dist1 = euclidean_distance_nonmod(_get(dst[1])->v, v, _f);
+        clusters_q.push(make_pair(-dist1, make_pair(top.second.first, static_cast<S>(dst[1]))));
+      }
+    }
+
     // Get distances for all items
     // To avoid calculating distance multiple times for any items, sort by id
     std::sort(nns.begin(), nns.end());
@@ -1692,6 +1790,7 @@ protected:
       if (j == last)
         continue;
       last = j;
+      // std::cout << "j = " << j << std::endl;
       if (_get(j)->n_descendants == 1)  // This is only to guard a really obscure case, #284
         nns_dist.push_back(make_pair(D::distance(v_node, _get(j), _f), j));
     }
