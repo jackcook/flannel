@@ -1680,7 +1680,7 @@ protected:
     }
 
     for (size_t i = 0; i < _roots.size(); i++) {
-      if (i >= 10) {
+      if (_get(_roots[i])->is_cluster_root) {
         T dist = euclidean_distance_nonmod(_get(_roots[i])->v, v, _f);
         auto p = make_pair(-dist, make_pair(i, _roots[i]));
         clusters_q.push(p);
