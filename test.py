@@ -36,8 +36,8 @@ f = np.load("glove_vecs.npz")
 vecs = f["vecs"]
 weights = f["weights"]
 
-vecs = vecs[:10000]
-weights = weights[:10000]
+# vecs = vecs[:10000]
+# weights = weights[:10000]
 
 f = 25
 # n_items = 10000
@@ -107,7 +107,7 @@ for a in it:
         old_score = old_matches / k
         assert item_i in old_idx
 
-        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.2)
+        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.1)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
         assert item_i in new_idx
