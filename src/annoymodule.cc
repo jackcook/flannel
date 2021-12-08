@@ -388,19 +388,18 @@ py_an_on_disk_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
 
 static PyObject *
 py_an_build(py_annoy *self, PyObject *args, PyObject *kwargs) {
-  int q, c = 0, n_neighbors=0, n_jobs = -1;
-  bool with_neighbors = false;
+  int q, n_neighbors=0, n_jobs = -1;
   float top_p = 1;
   if (!self->ptr) 
     return NULL;
-  static char const * kwlist[] = {"n_trees", "n_clusters", "top_p", "with_neighbors", "n_neighbors", "n_jobs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|ifbii", (char**)kwlist, &q, &c, &top_p, &with_neighbors, &n_neighbors, &n_jobs))
+  static char const * kwlist[] = {"n_trees", "top_p", "n_neighbors", "n_jobs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|fii", (char**)kwlist, &q, &top_p, &n_neighbors, &n_jobs))
     return NULL;
 
   bool res;
   char* error;
   Py_BEGIN_ALLOW_THREADS;
-  res = self->ptr->build(q, c, top_p, with_neighbors, n_neighbors, n_jobs, &error);
+  res = self->ptr->build(q, top_p, n_neighbors, n_jobs, &error);
   Py_END_ALLOW_THREADS;
   if (!res) {
     PyErr_SetString(PyExc_Exception, error);
