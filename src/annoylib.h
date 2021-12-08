@@ -441,12 +441,6 @@ inline void two_means_kmeans(const vector<Node*>& nodes, int f, Random& random, 
       Distance::init_node(centroids[k], f);
     }
   }
-
-  // for (size_t k = 0; k < centroids.size(); k++)
-  //   for (int l = 0; l < f; l++)
-  //     std::cout << centroids[k]->v[l] << " ";
-  
-  // std::cout << std::endl;
 }
 
 template<typename T, typename Random, typename Distance, typename Node>
@@ -876,17 +870,24 @@ struct Euclidean : Minkowski {
   }
   template<typename S, typename T, typename Random>
   static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n, Node<S, T>* p, Node<S, T>* q, bool use_kmeans) {
-    if (use_kmeans)
+    if (use_kmeans) {
       two_means_kmeans<T, Random, Euclidean, Node<S, T>>(nodes, f, random, false, p, q);
-    else
-      two_means<T, Random, Euclidean, Node<S, T> >(nodes, f, random, false, p, q);
 
-    for (int z = 0; z < f; z++)
-      n->v[z] = p->v[z] - q->v[z];
-    Base::normalize<T, Node<S, T> >(n, f);
-    n->a = 0.0;
-    for (int z = 0; z < f; z++)
-      n->a += -n->v[z] * (p->v[z] + q->v[z]) / 2;
+      for (int z = 0; z < f; z++)
+        n->v[z] = (p->v[z] + q->v[z]) / 2;
+
+      Base::normalize<T, Node<S, T> >(n, f);
+    } else {
+      two_means<T, Random, Euclidean, Node<S, T>>(nodes, f, random, false, p, q);
+
+      for (int z = 0; z < f; z++)
+        n->v[z] = p->v[z] - q->v[z];
+      Base::normalize<T, Node<S, T> >(n, f);
+      
+      n->a = 0.0;
+      for (int z = 0; z < f; z++)
+        n->a += -n->v[z] * (p->v[z] + q->v[z]) / 2;
+    }
   }
   template<typename T>
   static inline T normalized_distance(T distance) {
@@ -944,8 +945,8 @@ class AnnoyIndexInterface {
   virtual void unload() = 0;
   virtual bool load(const char* filename, bool prefault=false, char** error=NULL) = 0;
   virtual T get_distance(S i, S j) const = 0;
-  virtual void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
-  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
+  virtual void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_n_trees() const = 0;
   virtual void verbose(bool v) = 0;
@@ -1229,7 +1230,6 @@ public:
     _loaded = true;
     _built = true;
     _n_items = m;
-    // std::cout << "found " << _roots.size() << " roots with degree " << m << std::endl;
     if (_verbose) annoylib_showUpdate("found %lu roots with degree %d\n", _roots.size(), m);
     return true;
   }
@@ -1238,14 +1238,14 @@ public:
     return D::normalized_distance(D::distance(_get(i), _get(j), _f));
   }
 
-  void get_nns_by_item(S item, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void get_nns_by_item(S item, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
     // TODO: handle OOB
     const Node* m = _get(item);
-    _get_all_nns(m->v, n, search_k, result, distances);
+    _get_all_nns(m->v, n, search_k, clusters_p, result, distances);
   }
 
-  void get_nns_by_vector(const T* w, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
-    _get_all_nns(w, n, search_k, result, distances);
+  void get_nns_by_vector(const T* w, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
+    _get_all_nns(w, n, search_k, clusters_p, result, distances);
   }
 
   S get_n_items() const {
@@ -1317,7 +1317,7 @@ public:
       it++;
     }
 
-    // std::cout << "Building clustered trees with " << items.size() << " / " << _n_items << " items" << std::endl;
+    std::cout << "Building clustered trees with " << items.size() << " / " << _n_items << " items" << std::endl;
 
     // Each thread needs its own seed, otherwise each thread would be building the same tree(s)
     Random _random(_seed - 1);
@@ -1333,7 +1333,6 @@ public:
         centroid_index = items[_random.index(items.size())].second;
       }
 
-      // std::cout << "cluster " << i << " starting with index " << centroid_index << std::endl;
       centroid_indices.push_back(centroid_index);
 
       Node* new_node = (Node *)alloca(_s);
@@ -1357,9 +1356,6 @@ public:
       for (unsigned long a = 0; a < centroids.size(); a++) {
         for (size_t b = 0; b < items.size(); b++) {
           T dist = euclidean_distance_nonmod(centroids[a]->v, _get(items[b].second)->v, _f);
-
-          // if (iter == 0)
-          //     std::cout << "considering item " << items[b].second << " to cluster " << a << " with dist " << dist << std::endl;
 
           if (dist < minDists[b]) {
             minDists[b] = dist;
@@ -1398,18 +1394,6 @@ public:
 
         Distance::init_node(centroids[k], _f);
       }
-
-      // std::cout << "iter " << iter << " -- " << "cluster 0 has " << nPoints[0] << " points" << std::endl;
-    }
-
-    if (_verbose) {
-      std::cout << "centroid_indices: ";
-
-      for (unsigned long i = 0; i < centroid_indices.size(); i++) {
-        std::cout << centroid_indices[i] << " ";
-      }
-
-      std::cout << std::endl;
     }
 
     std::vector<int> cluster_counts;
@@ -1426,17 +1410,12 @@ public:
       cluster_counts.push_back(num);
     }
 
-    if (_verbose) {
-      for (int i = 0; i < n_clusters; i++) {
-        std::cout << "cluster " << i << " has " << cluster_counts[i] << " points" << std::endl;
-      }
-    }
+    std::cout << "Built clustered trees" << std::endl;
 
     vector<S> thread_roots;
     int real_cluster = 0;
     for (int cluster = 0; cluster < n_clusters; cluster++) {
       if (cluster_counts[cluster] == 0) {
-        std::cout << "cluster " << cluster << " has no points" << std::endl;
         continue;
       }
       if (_verbose) annoylib_showUpdate("pass %zd...\n", thread_roots.size());
@@ -1446,10 +1425,6 @@ public:
       for (size_t i = 0; i < items.size(); i++) {
         if (_get(items[i].second)->n_descendants >= 1 && clusters[i] == cluster) { // Issue #223
           indices.push_back(items[i].second);
-
-          // if (items[i].second == 3) {
-          //   std::cout << "item 3 is in cluster " << real_cluster << std::endl;
-          // }
         }
       }
       threaded_build_policy.unlock_shared_nodes();
@@ -1460,8 +1435,6 @@ public:
     threaded_build_policy.lock_roots();
     _roots.insert(_roots.end(), thread_roots.begin(), thread_roots.end());
     threaded_build_policy.unlock_roots();
-
-    std::cout << "Finished building clustered trees" << std::endl;
   }
 
   void thread_build(int q, int thread_idx, ThreadedBuildPolicy& threaded_build_policy) {
@@ -1693,13 +1666,11 @@ protected:
     return item;
   }
 
-  void _get_all_nns(const T* v, size_t n, int search_k, vector<S>* result, vector<T>* distances) const {
+  void _get_all_nns(const T* v, size_t n, int search_k, float clusters_p, vector<S>* result, vector<T>* distances) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);
     D::init_node(v_node, _f);
-
-    float clusters_p = 0.05;
 
     std::priority_queue<pair<T, pair<S, S>>> q;
     std::priority_queue<pair<T, pair<S, S>>> clusters_q;
@@ -1713,11 +1684,6 @@ protected:
         T dist = euclidean_distance_nonmod(_get(_roots[i])->v, v, _f);
         auto p = make_pair(-dist, make_pair(i, _roots[i]));
         clusters_q.push(p);
-
-        // for (int z = 0; z < _f; z++)
-        //   std::cout << _get(_roots[i])->v[z] << " ";
-        
-        // std::cout << std::endl;
       } else {
         auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
         q.push(p);
@@ -1745,30 +1711,18 @@ protected:
 
     while (nns.size() < (size_t)search_k && !clusters_q.empty()) {
       const pair<T, pair<S, S>>& top = clusters_q.top();
-      // std::cout << "popping " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
-      // T d = top.first;
       S i = top.second.second;
       Node* nd = _get(i);
       clusters_q.pop();
       if (nd->n_descendants == 1 && i < _n_items) {
-        std::cout << "pushing back " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
         nns.push_back(i);
       } else if (nd->n_descendants <= _K) {
-        std::cout << "adding several " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
         const S* dst = &nd->children[1];
         nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
-
-        std::cout << "n_descendants = " << nd->n_descendants << " _K = " << _K << std::endl;
-
-        for (int k = 0; k < nd->n_descendants; k++) {
-          std::cout << "k=" << k << " adding " << dst[k] << std::endl;
-        }
       } else {
-        std::cout << "recursing " << top.first << " " << top.second.first << " " << top.second.second << std::endl;
-
         const S* dst = &nd->children[0];
 
-        if (dst[0] > _n_items) {
+        if (!_get(dst[0])) {
           dst++;
         }
 
@@ -1790,7 +1744,6 @@ protected:
       if (j == last)
         continue;
       last = j;
-      // std::cout << "j = " << j << std::endl;
       if (_get(j)->n_descendants == 1)  // This is only to guard a really obscure case, #284
         nns_dist.push_back(make_pair(D::distance(v_node, _get(j), _f), j));
     }
