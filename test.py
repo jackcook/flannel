@@ -8,6 +8,7 @@ from sklearn.metrics import classification_report
 import sys
 import os
 import pickle
+import time
 
 if not os.path.exists("glove_vecs.npz"):
     df = pd.read_csv("unigram_freq.csv")
@@ -46,7 +47,7 @@ f = 25
 # vecs = np.random.randn(n_items, f)
 # weights = np.random.zipf(2, size=len(vecs))
 
-n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
+n_seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 n_trees = 10
 search_k = 500
 n_items = vecs.shape[0]
@@ -99,33 +100,38 @@ nearest = {}
 if os.path.exists("nearest.pkl"):
     nearest = pickle.load(open("nearest.pkl", "rb"))
 
-it = range(n_iter)
+start = time.time()
+np.random.seed(0)
 
-if n_iter != 1:
-    it = trange(n_iter)
+while time.time() - start < n_seconds:
+    item_i = np.random.choice(range(n_items), p=p / p.sum())
+    gt_idx = get_gt_idx(item_i)
 
-for a in it:
-    np.random.seed(a)
+    old_idx = t_old.get_nns_by_item(item_i, k, search_k=search_k)
+    old_matches = len(set(gt_idx).intersection(set(old_idx)))
+    old_score = old_matches / k
+    assert item_i in old_idx
+    old_scores.append(old_score)
 
-    for _ in range(100):
-        item_i = np.random.choice(range(n_items), p=p / p.sum())
-        gt_idx = get_gt_idx(item_i)
+start = time.time()
+np.random.seed(0)
 
-        old_idx = t_old.get_nns_by_item(item_i, k, search_k=search_k)
-        old_matches = len(set(gt_idx).intersection(set(old_idx)))
-        old_score = old_matches / k
-        assert item_i in old_idx
+while time.time() - start < n_seconds:
+    item_i = np.random.choice(range(n_items), p=p / p.sum())
+    gt_idx = get_gt_idx(item_i)
 
-        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k)
-        new_matches = len(set(gt_idx).intersection(set(new_idx)))
-        new_score = new_matches / k
-        assert item_i in new_idx
+    new_idx = t.get_nns_by_item(item_i, k, search_k=search_k)
+    new_matches = len(set(gt_idx).intersection(set(new_idx)))
+    new_score = new_matches / k
+    assert item_i in new_idx
 
-        old_scores.append(old_score)
-        new_scores.append(new_score)
+    new_scores.append(new_score)
 
-print(f"Old score: {np.mean(old_scores)}")
-print(f"New score: {np.mean(new_scores)}")
+print(f"Old: {np.mean(old_scores) * 100:.2f}%, {len(old_scores) / 5} qps")
+print(f"New: {np.mean(new_scores) * 100:.2f}%, {len(new_scores) / 5} qps")
+
+# print(f"Old score: {np.mean(old_scores)}")
+# print(f"New score: {np.mean(new_scores)}")
 
 with open("nearest.pkl", "wb") as f:
     pickle.dump(nearest, f)
