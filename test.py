@@ -3,6 +3,8 @@ import pandas as pd
 from annoy import AnnoyIndex
 from flannel import AnnoyIndex as FlannelIndex
 from tqdm import trange, tqdm
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report
 import sys
 import os
 import pickle
@@ -36,8 +38,8 @@ f = np.load("glove_vecs.npz")
 vecs = f["vecs"]
 weights = f["weights"]
 
-vecs = vecs[:20000]
-weights = weights[:20000]
+# vecs = vecs[:20000]
+# weights = weights[:20000]
 
 f = 25
 # n_items = 10000
@@ -45,17 +47,16 @@ f = 25
 # weights = np.random.zipf(2, size=len(vecs))
 
 n_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 10
-n_trees = 20
+n_trees = 10
 search_k = 500
 n_items = vecs.shape[0]
-n_clusters = 10
 k = 10
 
 old_scores = []
 new_scores = []
 
-t_old = AnnoyIndex(f, "euclidean")
-t = FlannelIndex(f, "euclidean")
+t_old = AnnoyIndex(f, "angular")
+t = FlannelIndex(f, "angular")
 
 p = weights / weights.sum()
 
@@ -70,11 +71,23 @@ if not os.path.exists("test.ann"):
     for i in range(n_items):
         t.add_item(i, vecs[i], p[i])
 
-    t.build(n_trees, top_p=0.01, with_neighbors=True, n_neighbors=k)
+    t.build(n_trees, top_p=0.05, n_neighbors=k)
     t.save("test.ann")
 
 t_old.load("test_old.ann")
 t.load("test.ann")
+
+top_p = 0.5
+is_in = weights > np.percentile(weights, 100 - top_p * 100)
+
+model = LogisticRegression()
+model.fit(vecs, is_in)
+
+print(is_in.sum())
+
+print(classification_report(is_in, model.predict(vecs)))
+
+t.set_model(model.coef_[0].tolist(), model.intercept_[0])
 
 def get_gt_idx(item_i):
     if item_i in nearest:

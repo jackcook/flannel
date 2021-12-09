@@ -850,6 +850,7 @@ class AnnoyIndexInterface {
   virtual void get_item(S item, T* v) const = 0;
   virtual void set_seed(R q) = 0;
   virtual bool on_disk_build(const char* filename, char** error=NULL) = 0;
+  virtual void set_model(const T* coef, T intercept) = 0;
 };
 
 template<typename S, typename T, typename Distance, typename Random, class ThreadedBuildPolicy>
@@ -884,6 +885,8 @@ protected:
   S _n_nodes;
   S _nodes_size;
   vector<S> _roots;
+  vector<T> _model_coef;
+  T _model_intercept;
   S _K;
   R _seed;
   bool _loaded;
@@ -1056,6 +1059,7 @@ public:
     _on_disk = false;
     _seed = Random::default_seed;
     _roots.clear();
+    _model_coef.clear();
   }
 
   void unload() {
@@ -1166,6 +1170,13 @@ public:
     _seed = seed;
   }
 
+  void set_model(const T* coef, T intercept) {
+    for (int z = 0; z < _f; z++)
+      _model_coef.push_back(coef[z]);
+
+    _model_intercept = intercept;
+  }
+
   void workload_aware_build(float top_p, int n_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
     // Get top percentile of items by weight
     vector<pair<T, S>> items;
@@ -1222,7 +1233,9 @@ public:
       }
     }
     threaded_build_policy.unlock_shared_nodes();
-    thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
+    for (int i = 0; i < 10; i++) {
+      thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
+    }
 
     threaded_build_policy.lock_roots();
     _roots.insert(_roots.end(), thread_roots.begin(), thread_roots.end());
@@ -1436,7 +1449,14 @@ protected:
       search_k = n * _roots.size();
     }
 
+    T model_out = _model_intercept;
+
+    for (int z = 0; z < _f; z++)
+      model_out += v_node->v[z] * _model_coef[z];
+
     for (size_t i = 0; i < _roots.size(); i++) {
+      if (model_out < 0 && i >= 10) continue;
+
       auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
       q.push(p);
     }

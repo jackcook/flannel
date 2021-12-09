@@ -500,6 +500,26 @@ py_an_set_seed(py_annoy *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *
+py_an_set_model(py_annoy *self, PyObject *args, PyObject *kwargs) {
+  PyObject* coef;
+  float intercept = 0;
+  if (!self->ptr) 
+    return NULL;
+  static char const * kwlist[] = {"coef", "intercept", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Of", (char**)kwlist, &coef, &intercept))
+    return NULL;
+  
+  vector<float> w(self->f);
+  if (!convert_list_to_vector(coef, self->f, &w)) {
+    return NULL;
+  }
+
+  self->ptr->set_model(&w[0], intercept);
+
+  Py_RETURN_NONE;
+}
+
 
 static PyMethodDef AnnoyMethods[] = {
   {"load",	(PyCFunction)py_an_load, METH_VARARGS | METH_KEYWORDS, "Loads (mmaps) an index from disk."},
@@ -517,6 +537,7 @@ static PyMethodDef AnnoyMethods[] = {
   {"get_n_trees",(PyCFunction)py_an_get_n_trees, METH_NOARGS, "Returns the number of trees in the index."},
   {"verbose",(PyCFunction)py_an_verbose, METH_VARARGS, ""},
   {"set_seed",(PyCFunction)py_an_set_seed, METH_VARARGS, "Sets the seed of Annoy's random number generator."},
+  {"set_model",(PyCFunction)py_an_set_model, METH_VARARGS | METH_KEYWORDS, "Sets the model."},
   {NULL, NULL, 0, NULL}		 /* Sentinel */
 };
 
