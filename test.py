@@ -83,10 +83,6 @@ is_in = weights > np.percentile(weights, 100 - top_p * 100)
 model = LogisticRegression()
 model.fit(vecs, is_in)
 
-print(is_in.sum())
-
-print(classification_report(is_in, model.predict(vecs)))
-
 t.set_model(model.coef_[0].tolist(), model.intercept_[0])
 
 def get_gt_idx(item_i):
@@ -120,10 +116,10 @@ for a in it:
         old_score = old_matches / k
         assert item_i in old_idx
 
-        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k, clusters_p=0.0)
+        new_idx = t.get_nns_by_item(item_i, k, search_k=search_k)
         new_matches = len(set(gt_idx).intersection(set(new_idx)))
         new_score = new_matches / k
-        # assert item_i in new_idx
+        assert item_i in new_idx
 
         old_scores.append(old_score)
         new_scores.append(new_score)
