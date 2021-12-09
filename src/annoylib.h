@@ -1177,7 +1177,7 @@ public:
     _model_intercept = intercept;
   }
 
-  void workload_aware_build(float top_p, int n_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
+  void workload_aware_build(int q, float top_p, int n_neighbors, ThreadedBuildPolicy& threaded_build_policy) {
     // Get top percentile of items by weight
     vector<pair<T, S>> items;
 
@@ -1233,7 +1233,7 @@ public:
       }
     }
     threaded_build_policy.unlock_shared_nodes();
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < q; i++) {
       thread_roots.push_back(_make_tree(indices, true, _random, threaded_build_policy));
     }
 
@@ -1455,7 +1455,7 @@ protected:
       model_out += v_node->v[z] * _model_coef[z];
 
     for (size_t i = 0; i < _roots.size(); i++) {
-      if (model_out < 0 && i >= 10) continue;
+      if (model_out < 0 && _get(_roots[i])->is_cluster_root) continue;
 
       auto p = make_pair(Distance::template pq_initial_value<T>(), make_pair(i, _roots[i]));
       q.push(p);
@@ -1510,7 +1510,7 @@ public:
   template<typename S, typename T, typename D, typename Random>
   static void build(AnnoyIndex<S, T, D, Random, AnnoyIndexSingleThreadedBuildPolicy>* annoy, int q, float top_p, int n_neighbors, int n_threads) {
     AnnoyIndexSingleThreadedBuildPolicy threaded_build_policy;
-    annoy->workload_aware_build(top_p, n_neighbors, threaded_build_policy);
+    annoy->workload_aware_build(q, top_p, n_neighbors, threaded_build_policy);
     annoy->thread_build(q, 0, threaded_build_policy);
   }
 
@@ -1544,7 +1544,7 @@ public:
       n_threads = std::max(1, (int)std::thread::hardware_concurrency());
     }
 
-    annoy->workload_aware_build(top_p, n_neighbors, threaded_build_policy);
+    annoy->workload_aware_build(q, top_p, n_neighbors, threaded_build_policy);
 
     vector<std::thread> threads(n_threads);
 
